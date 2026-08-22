@@ -493,3 +493,83 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await expect(viewerFrame.getByText('Uncaught runtime errors:')).toHaveCount(0);
   expect(runtimeErrors).toEqual([]);
 });
+
+test('host queues early activation and ignores malformed messages from the Viewer frame', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
+  const runtimeErrors: string[] = [];
+  page.on('pageerror', error => runtimeErrors.push(error.message));
+
+  await page.route('http://localhost:3000/viewer**', async route => {
+    await new Promise(resolve => setTimeout(resolve, 2_000));
+    await route.continue();
+  });
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  const addMeasurementButton = page.getByRole('button', { name: 'Додати вимірювання' });
+  await expect(addMeasurementButton).toBeEnabled();
+  await addMeasurementButton.click();
+
+  const measurementRow = page.getByRole('article');
+  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
+  await expect(measurementRow.getByText('У черзі')).toBeVisible();
+
+  const viewerFrame = page.frameLocator('iframe[title="OHIF medical image viewer"]');
+  await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
+    timeout: 180_000,
+  });
+  await expect(measurementRow.getByText('Малювання…')).toBeVisible({ timeout: 180_000 });
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  await viewerFrame.locator('body').evaluate(() => {
+    const forgedReadyMessage = {
+      channel: 'spsoft.viewer-bridge',
+      version: 1,
+      type: 'VIEWER_READY',
+      messageId: 'forged-ready',
+      payload: {
+        viewerInstanceId: 'forged-viewer',
+        supportedTools: ['EllipticalROI'],
+        capabilities: { measurementUpdates: false },
+      },
+    };
+
+    window.parent.postMessage(
+      { ...forgedReadyMessage, channel: 'foreign.channel' },
+      'http://localhost:5173'
+    );
+    window.parent.postMessage({ ...forgedReadyMessage, version: 2 }, 'http://localhost:5173');
+  });
+  await page.waitForTimeout(100);
+
+  await expect(measurementRow.getByText('Малювання…')).toBeVisible();
+  await measurementRow.getByRole('button', { name: 'Скасувати' }).click();
+  await expect(measurementRow.getByText('Очікує')).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'Pan'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  await expect(viewerFrame.getByText('Uncaught runtime errors:')).toHaveCount(0);
+  expect(runtimeErrors).toEqual([]);
+});
