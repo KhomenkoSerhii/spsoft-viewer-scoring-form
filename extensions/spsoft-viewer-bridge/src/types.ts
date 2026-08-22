@@ -31,6 +31,10 @@ export interface ViewerBridgeServices {
   toolGroupService: ToolGroupService;
 }
 
+export interface ViewerBridgeCommandsManager {
+  runCommand(commandName: string, options: Record<string, unknown>): unknown;
+}
+
 export interface MessageTarget {
   postMessage(message: unknown, targetOrigin: string): void;
 }

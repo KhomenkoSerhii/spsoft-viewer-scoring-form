@@ -9,6 +9,7 @@ module.exports = {
   ...base,
   // https://jestjs.io/docs/en/configuration#projects-array-string-projectconfig
   projects: [
+    '<rootDir>/host-app/jest.config.cjs',
     '<rootDir>/platform/*/jest.config.js',
     '<rootDir>/extensions/*/jest.config.js',
     '<rootDir>/packages/*/jest.config.js',

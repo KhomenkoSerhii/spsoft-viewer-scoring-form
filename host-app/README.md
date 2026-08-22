@@ -37,8 +37,24 @@ another Viewer origin or study, copy `.env.example` to `.env.local` and change
 `VITE_VIEWER_ORIGIN` or `VITE_VIEWER_STUDY_UID`. Keep `VITE_VIEWER_ORIGIN` limited to the origin
 itself (for example, `http://localhost:3000`); the host app builds the Viewer URL from it.
 
-## PR 1 scope
+## Viewer bridge
 
-This bootstrap intentionally contains only the application shell, iframe and responsive scoring
-layout. The measurement button stays disabled until the versioned viewer bridge is added in a
-separate feature PR.
+The host installs its `message` listener before mounting the iframe, accepts bridge messages only
+from the configured Viewer origin and that iframe's `contentWindow`, and waits for `VIEWER_READY`.
+
+Add a measurement row and choose **Activate Ellipse** to arm `EllipticalROI` in OHIF. Only one row
+can be queued or drawing at a time. Activation requested before the Viewer is ready is queued and
+sent after the handshake; **Cancel** drops a queued request or restores the Viewer to Pan.
+
+Measurement values and totals are intentionally added in the following focused PR.
+
+## Checks
+
+From the repository root:
+
+```bash
+yarn typecheck:host
+yarn test:host
+yarn build:host
+yarn test:smoke:spsoft
+```

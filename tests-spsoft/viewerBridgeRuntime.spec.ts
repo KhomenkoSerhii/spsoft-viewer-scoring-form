@@ -4,13 +4,11 @@ interface CapturedBridgeMessage {
   origin: string;
   data: {
     type?: string;
-    payload?: {
-      viewerInstanceId?: string;
-    };
+    payload?: Record<string, unknown>;
   };
 }
 
-test('host renders OHIF and receives VIEWER_READY', async ({ page }) => {
+test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
 
@@ -52,6 +50,64 @@ test('host renders OHIF and receives VIEWER_READY', async ({ page }) => {
       data: {
         type: 'VIEWER_READY',
         payload: { viewerInstanceId: expect.any(String) },
+      },
+    });
+
+  await expect(page.getByText('Viewer підключено')).toBeVisible();
+
+  await page.getByRole('button', { name: 'Додати вимірювання' }).click();
+  const measurementRow = page.getByRole('article').first();
+  await expect(measurementRow.getByText('Очікує')).toBeVisible();
+
+  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
+  await expect(measurementRow.getByText('Малювання…')).toBeVisible();
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          return bridgeWindow.__spsoftBridgeMessages.find(
+            message =>
+              message.origin === 'http://localhost:5173' && message.data?.type === 'ACTIVATE_TOOL'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toMatchObject({
+      origin: 'http://localhost:5173',
+      data: {
+        type: 'ACTIVATE_TOOL',
+        payload: {
+          toolName: 'EllipticalROI',
+        },
+      },
+    });
+
+  await measurementRow.getByRole('button', { name: 'Скасувати' }).click();
+  await expect(measurementRow.getByText('Очікує')).toBeVisible();
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          return bridgeWindow.__spsoftBridgeMessages.find(
+            message =>
+              message.origin === 'http://localhost:5173' && message.data?.type === 'DEACTIVATE_TOOL'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toMatchObject({
+      origin: 'http://localhost:5173',
+      data: {
+        type: 'DEACTIVATE_TOOL',
+        payload: { reason: 'user-cancelled' },
       },
     });
 
