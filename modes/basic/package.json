@@ -28,7 +28,8 @@
     "@ohif/extension-cornerstone-dicom-sr": "3.12.10",
     "@ohif/extension-default": "3.12.10",
     "@ohif/extension-dicom-pdf": "3.12.10",
-    "@ohif/extension-dicom-video": "3.12.10"
+    "@ohif/extension-dicom-video": "3.12.10",
+    "@spsoft/extension-viewer-bridge": "0.1.0"
   },
   "dependencies": {
     "@babel/runtime": "7.28.2"

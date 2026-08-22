@@ -5,6 +5,9 @@ window.config = {
   routerBasename: null,
   // whiteLabeling: {},
   extensions: [],
+  spsoftViewerBridge: {
+    hostOrigin: 'http://localhost:5173',
+  },
   modes: [],
   customizationService: {},
   showStudyList: true,

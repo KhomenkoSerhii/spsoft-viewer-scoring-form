@@ -56,6 +56,7 @@ platform/app/.recipes/OpenResty-Orthanc/logs/*
 # PlayWright
 
 node_modules/
+test-results/
 tests/test-results/
 tests/playwright-report/
 /blob-report/

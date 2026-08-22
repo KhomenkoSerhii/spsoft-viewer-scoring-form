@@ -1,8 +1,11 @@
 {
-  "name": "@spsoft/viewer-protocol",
+  "name": "@spsoft/extension-viewer-bridge",
   "version": "0.1.0",
   "private": true,
-  "description": "Typed postMessage contract shared by the SPSoft host app and OHIF bridge",
+  "description": "Secure postMessage bridge between the SPSoft host and OHIF Viewer",
+  "keywords": [
+    "ohif-extension"
+  ],
   "main": "src/index.ts",
   "module": "src/index.ts",
   "types": "src/index.ts",
@@ -10,6 +13,9 @@
   "scripts": {
     "test": "jest --config jest.config.js --runInBand",
     "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@spsoft/viewer-protocol": "0.1.0"
   },
   "devDependencies": {
     "@types/jest": "29.5.14",
