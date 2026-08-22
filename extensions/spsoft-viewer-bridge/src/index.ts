@@ -11,6 +11,7 @@ interface ExtensionParams {
     spsoftViewerBridge?: unknown;
   };
   configuration?: unknown;
+  commandsManager: ViewerBridgeControllerOptions['commandsManager'];
   servicesManager: {
     services: ViewerBridgeServices;
   };
@@ -52,7 +53,12 @@ export function createViewerBridgeExtension(dependencies: ViewerBridgeExtensionD
   return {
     id,
 
-    preRegistration({ appConfig, configuration, servicesManager }: ExtensionParams): void {
+    preRegistration({
+      appConfig,
+      commandsManager,
+      configuration,
+      servicesManager,
+    }: ExtensionParams): void {
       controller?.dispose();
       controller = null;
 
@@ -65,9 +71,11 @@ export function createViewerBridgeExtension(dependencies: ViewerBridgeExtensionD
         const { hostOrigin } = parseViewerBridgeConfiguration(resolvedConfiguration);
         nextController = controllerFactory({
           bridgeWindow: getBridgeWindow(),
+          commandsManager,
           hostOrigin,
           services: servicesManager.services,
           createId,
+          onCommandError: error => warn('Viewer bridge command could not be applied.', error),
         });
         nextController.install();
         controller = nextController;

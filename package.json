@@ -42,6 +42,7 @@
     "dev:host": "yarn workspace @spsoft/host-app dev",
     "build:host": "yarn workspace @spsoft/host-app build",
     "typecheck:host": "yarn workspace @spsoft/host-app typecheck",
+    "test:host": "yarn workspace @spsoft/host-app test",
     "test:protocol": "yarn workspace @spsoft/viewer-protocol test",
     "typecheck:protocol": "yarn workspace @spsoft/viewer-protocol typecheck",
     "test:viewer-bridge": "yarn workspace @spsoft/extension-viewer-bridge test",

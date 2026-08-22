@@ -8,22 +8,24 @@ sending `VIEWER_READY`. Messages use the shared `@spsoft/viewer-protocol` contra
 
 ## Configuration
 
-Register the extension with an exact host origin:
+Add the extension as a mode dependency and configure an exact host origin at the top level of the
+OHIF app config:
 
 ```js
-extensions: [
-  [
-    '@spsoft/extension-viewer-bridge',
-    {
-      hostOrigin: 'http://localhost:5173',
-    },
-  ],
-];
+window.config = {
+  spsoftViewerBridge: {
+    hostOrigin: 'http://localhost:5173',
+  },
+};
 ```
 
 Wildcard origins and URLs containing paths, query strings, or fragments are rejected.
 
 ## Current scope
 
-This package currently implements the secure boundary and `VIEWER_READY` handshake. Tool
-activation and measurement correlation are added in the following focused PRs.
+The bridge implements the secure boundary, `VIEWER_READY` handshake, and correlated
+`ACTIVATE_TOOL`/`DEACTIVATE_TOOL` commands for `EllipticalROI`. A valid activation arms the OHIF
+tool through `commandsManager`; cancellation, replacement and mode cleanup restore Pan.
+
+Measurement-created and measurement-updated events are intentionally added in the following
+focused PR.

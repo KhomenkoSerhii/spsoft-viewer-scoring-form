@@ -11,6 +11,7 @@ import type {
   BridgeWindow,
   HostMessageHandler,
   ToolGroup,
+  ViewerBridgeCommandsManager,
   ViewerBridgeServices,
   ViewportGridState,
 } from './types';
@@ -20,18 +21,28 @@ const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 
 export interface ViewerBridgeControllerOptions {
   bridgeWindow: BridgeWindow;
+  commandsManager: ViewerBridgeCommandsManager;
   hostOrigin: string;
   services: ViewerBridgeServices;
   createId: () => string;
   onHostMessage?: HostMessageHandler;
+  onCommandError?: (error: unknown) => void;
+}
+
+interface ArmedActivation {
+  activationId: string;
+  rowId: string;
+  toolName: SupportedToolName;
 }
 
 export class ViewerBridgeController {
   private readonly bridgeWindow: BridgeWindow;
+  private readonly commandsManager: ViewerBridgeCommandsManager;
   private readonly hostOrigin: string;
   private readonly services: ViewerBridgeServices;
   private readonly createId: () => string;
   private readonly onHostMessage: HostMessageHandler | undefined;
+  private readonly onCommandError: ((error: unknown) => void) | undefined;
   private readonly subscriptions: BridgeSubscription[] = [];
   private installed = false;
   private modeActive = false;
@@ -39,13 +50,16 @@ export class ViewerBridgeController {
   private viewerInstanceId: string | null = null;
   private readyRetryIndex = 0;
   private readyRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  private armedActivation: ArmedActivation | null = null;
 
   constructor(options: ViewerBridgeControllerOptions) {
     this.bridgeWindow = options.bridgeWindow;
+    this.commandsManager = options.commandsManager;
     this.hostOrigin = options.hostOrigin;
     this.services = options.services;
     this.createId = options.createId;
     this.onHostMessage = options.onHostMessage;
+    this.onCommandError = options.onCommandError;
   }
 
   install(): void {
@@ -88,6 +102,7 @@ export class ViewerBridgeController {
   }
 
   exitMode(): void {
+    this.deactivateArmedTool();
     this.modeActive = false;
     this.readyAnnounced = false;
     this.viewerInstanceId = null;
@@ -131,8 +146,68 @@ export class ViewerBridgeController {
       return;
     }
 
+    try {
+      this.executeHostCommand(message);
+    } catch (error) {
+      this.onCommandError?.(error);
+    }
     this.onHostMessage?.(message);
   };
+
+  private executeHostCommand(message: Parameters<HostMessageHandler>[0]): void {
+    if (message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL) {
+      const { activationId, rowId, toolName } = message.payload;
+      const toolGroup = this.services.toolGroupService.getToolGroup();
+
+      if (!toolGroup?.hasTool(toolName)) {
+        return;
+      }
+
+      if (
+        this.armedActivation?.rowId === rowId &&
+        this.armedActivation.activationId === activationId
+      ) {
+        return;
+      }
+
+      this.deactivateArmedTool();
+
+      if (!this.setToolActive(toolName)) {
+        return;
+      }
+
+      this.armedActivation = { rowId, activationId, toolName };
+      return;
+    }
+
+    if (
+      this.armedActivation?.rowId !== message.payload.rowId ||
+      this.armedActivation.activationId !== message.payload.activationId
+    ) {
+      return;
+    }
+
+    this.deactivateArmedTool();
+  }
+
+  private deactivateArmedTool(): void {
+    if (!this.armedActivation) {
+      return;
+    }
+
+    this.armedActivation = null;
+    this.setToolActive('Pan');
+  }
+
+  private setToolActive(toolName: string): boolean {
+    try {
+      this.commandsManager.runCommand('setToolActive', { toolName });
+      return true;
+    } catch (error) {
+      this.onCommandError?.(error);
+      return false;
+    }
+  }
 
   private readonly tryAnnounceReady = (): void => {
     if (!this.modeActive || this.readyAnnounced || !this.viewerInstanceId) {

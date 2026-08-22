@@ -127,8 +127,10 @@ function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean }
   const services: ViewerBridgeServices = { viewportGridService, toolGroupService };
   const ids = ['viewer-session-1', 'ready-message-1', 'viewer-session-2', 'ready-message-2'];
   const onHostMessage = jest.fn();
+  const commandsManager = { runCommand: jest.fn() };
   const controller = new ViewerBridgeController({
     bridgeWindow,
+    commandsManager,
     hostOrigin: 'http://localhost:5173',
     services,
     createId: () => ids.shift() ?? 'fallback-id',
@@ -148,6 +150,7 @@ function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean }
 
   return {
     bridgeWindow,
+    commandsManager,
     controller,
     makeReady,
     onHostMessage,
@@ -261,6 +264,123 @@ describe('ViewerBridgeController handshake', () => {
     });
 
     expect(sessionIds).toEqual(['viewer-session-1', 'viewer-session-2']);
+  });
+});
+
+describe('ViewerBridgeController tool commands', () => {
+  beforeEach(() => jest.useFakeTimers());
+
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('activates EllipticalROI once for a correlated host command', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady } = createHarness();
+    controller.enterMode();
+    makeReady();
+    const command = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+      {
+        targetViewerInstanceId: 'viewer-session-1',
+        rowId: 'row-1',
+        activationId: 'activation-1',
+        toolName: 'EllipticalROI',
+      },
+      'activate-1'
+    );
+
+    bridgeWindow.dispatchMessage({
+      data: command,
+      origin: 'http://localhost:5173',
+    });
+    bridgeWindow.dispatchMessage({
+      data: command,
+      origin: 'http://localhost:5173',
+    });
+
+    expect(commandsManager.runCommand).toHaveBeenCalledTimes(1);
+    expect(commandsManager.runCommand).toHaveBeenCalledWith('setToolActive', {
+      toolName: 'EllipticalROI',
+    });
+  });
+
+  it('returns to Pan only for the matching active activation', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'stale-activation',
+          reason: 'user-cancelled',
+        },
+        'cancel-stale'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          reason: 'user-cancelled',
+        },
+        'cancel-current'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(commandsManager.runCommand).toHaveBeenNthCalledWith(1, 'setToolActive', {
+      toolName: 'EllipticalROI',
+    });
+    expect(commandsManager.runCommand).toHaveBeenNthCalledWith(2, 'setToolActive', {
+      toolName: 'Pan',
+    });
+    expect(commandsManager.runCommand).toHaveBeenCalledTimes(2);
+  });
+
+  it('returns an armed tool to Pan during mode cleanup', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    controller.exitMode();
+
+    expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
+      toolName: 'Pan',
+    });
   });
 });
 

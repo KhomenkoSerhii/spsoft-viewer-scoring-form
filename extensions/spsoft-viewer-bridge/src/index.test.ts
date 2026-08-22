@@ -9,6 +9,7 @@ function createHarness() {
     install: jest.fn(),
   };
   const controllerFactory = jest.fn(() => lifecycleController);
+  const commandsManager = { runCommand: jest.fn() };
   const warn = jest.fn();
   const bridgeWindow = {
     parent: { postMessage: jest.fn() },
@@ -36,6 +37,7 @@ function createHarness() {
 
   return {
     bridgeWindow,
+    commandsManager,
     controllerFactory,
     extension,
     lifecycleController,
@@ -46,11 +48,18 @@ function createHarness() {
 
 describe('viewer bridge extension lifecycle', () => {
   it('uses appConfig when OHIF registers the extension through a mode dependency', () => {
-    const { bridgeWindow, controllerFactory, extension, lifecycleController, services } =
-      createHarness();
+    const {
+      bridgeWindow,
+      commandsManager,
+      controllerFactory,
+      extension,
+      lifecycleController,
+      services,
+    } = createHarness();
 
     extension.preRegistration({
       appConfig: { spsoftViewerBridge: { hostOrigin: 'http://localhost:5173/' } },
+      commandsManager,
       configuration: {},
       servicesManager: { services },
     });
@@ -59,9 +68,11 @@ describe('viewer bridge extension lifecycle', () => {
 
     expect(controllerFactory).toHaveBeenCalledWith({
       bridgeWindow,
+      commandsManager,
       hostOrigin: 'http://localhost:5173',
       services,
       createId: expect.any(Function),
+      onCommandError: expect.any(Function),
     });
     expect(lifecycleController.install).toHaveBeenCalledTimes(1);
     expect(lifecycleController.enterMode).toHaveBeenCalledTimes(1);
@@ -69,10 +80,11 @@ describe('viewer bridge extension lifecycle', () => {
   });
 
   it('prefers an explicit extension configuration override', () => {
-    const { controllerFactory, extension, services } = createHarness();
+    const { commandsManager, controllerFactory, extension, services } = createHarness();
 
     extension.preRegistration({
       appConfig: { spsoftViewerBridge: { hostOrigin: 'http://localhost:5173' } },
+      commandsManager,
       configuration: { hostOrigin: 'https://host.example' },
       servicesManager: { services },
     });
@@ -83,10 +95,11 @@ describe('viewer bridge extension lifecycle', () => {
   });
 
   it('disables the optional bridge without throwing when configuration is missing', () => {
-    const { controllerFactory, extension, services, warn } = createHarness();
+    const { commandsManager, controllerFactory, extension, services, warn } = createHarness();
 
     expect(() =>
       extension.preRegistration({
+        commandsManager,
         configuration: {},
         servicesManager: { services },
       })
@@ -101,7 +114,8 @@ describe('viewer bridge extension lifecycle', () => {
   });
 
   it('does not retain a controller whose installation fails', () => {
-    const { controllerFactory, extension, lifecycleController, services, warn } = createHarness();
+    const { commandsManager, controllerFactory, extension, lifecycleController, services, warn } =
+      createHarness();
     lifecycleController.install.mockImplementation(() => {
       throw new Error('OHIF services are unavailable.');
     });
@@ -109,6 +123,7 @@ describe('viewer bridge extension lifecycle', () => {
     expect(() =>
       extension.preRegistration({
         appConfig: { spsoftViewerBridge: { hostOrigin: 'http://localhost:5173' } },
+        commandsManager,
         servicesManager: { services },
       })
     ).not.toThrow();
@@ -124,9 +139,10 @@ describe('viewer bridge extension lifecycle', () => {
   });
 
   it('disposes the previous controller before applying a new registration', () => {
-    const { extension, lifecycleController, services } = createHarness();
+    const { commandsManager, extension, lifecycleController, services } = createHarness();
     const params = {
       appConfig: { spsoftViewerBridge: { hostOrigin: 'http://localhost:5173' } },
+      commandsManager,
       servicesManager: { services },
     };
 
