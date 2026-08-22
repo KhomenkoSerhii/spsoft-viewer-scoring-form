@@ -206,7 +206,7 @@ describe('ViewerBridgeController handshake', () => {
       payload: {
         viewerInstanceId: 'viewer-session-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementUpdates: true },
       },
     });
   });
@@ -464,6 +464,65 @@ describe('ViewerBridgeController measurement correlation', () => {
     });
 
     expect(bridgeWindow.postedMessages).toHaveLength(1);
+  });
+
+  it('publishes live updates only for an annotation correlated by the bridge', () => {
+    const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'untracked-annotation',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 100, areaUnit: 'mm²' } },
+      },
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 50.25, areaUnit: 'mm²' } },
+      },
+    });
+
+    expect(bridgeWindow.postedMessages).toHaveLength(3);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[2]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED,
+        payload: {
+          viewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+          measurement: {
+            kind: 'area',
+            value: 50.25,
+            unit: 'mm2',
+            rawUnit: 'mm²',
+          },
+        },
+      })
+    );
   });
 });
 

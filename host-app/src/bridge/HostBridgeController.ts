@@ -4,6 +4,7 @@ import {
   isViewerToHostMessage,
   parseBridgeMessage,
   type MeasurementAddedPayload,
+  type MeasurementUpdatedPayload,
   type SupportedToolName,
   type ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
@@ -30,6 +31,7 @@ export interface HostBridgeCallbacks {
   onActivationReset(request: ActivationRequest): void;
   onActivationSent(request: ActivationRequest): void;
   onMeasurementAdded(payload: MeasurementAddedPayload): void;
+  onMeasurementUpdated(payload: MeasurementUpdatedPayload): void;
   onViewerLoading(): void;
   onViewerReady(payload: ViewerReadyPayload): void;
 }
@@ -49,7 +51,7 @@ export class HostBridgeController {
   private readonly hostWindow: HostMessageWindow;
   private readonly viewerOrigin: string;
   private activeRequest: ActivationRequest | null = null;
-  private readonly acceptedAnnotationIds = new Set<string>();
+  private readonly rowIdsByAnnotationId = new Map<string, string>();
   private readonly acceptedMessageIds = new Set<string>();
   private installed = false;
   private pendingRequest: ActivationRequest | null = null;
@@ -116,7 +118,7 @@ export class HostBridgeController {
     }
 
     this.viewerSession = null;
-    this.acceptedAnnotationIds.clear();
+    this.rowIdsByAnnotationId.clear();
     this.acceptedMessageIds.clear();
     this.callbacks.onViewerLoading();
   }
@@ -129,7 +131,7 @@ export class HostBridgeController {
     this.activeRequest = null;
     this.pendingRequest = null;
     this.viewerSession = null;
-    this.acceptedAnnotationIds.clear();
+    this.rowIdsByAnnotationId.clear();
     this.acceptedMessageIds.clear();
 
     if (!this.installed) {
@@ -158,6 +160,11 @@ export class HostBridgeController {
       return;
     }
 
+    if (message.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED) {
+      this.acceptMeasurementUpdate(message.messageId, message.payload);
+      return;
+    }
+
     if (message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY) {
       return;
     }
@@ -165,7 +172,7 @@ export class HostBridgeController {
     const previousViewerInstanceId = this.viewerSession?.viewerInstanceId;
 
     if (previousViewerInstanceId && previousViewerInstanceId !== message.payload.viewerInstanceId) {
-      this.acceptedAnnotationIds.clear();
+      this.rowIdsByAnnotationId.clear();
       this.acceptedMessageIds.clear();
     }
 
@@ -190,7 +197,7 @@ export class HostBridgeController {
     if (
       !activeRequest ||
       this.acceptedMessageIds.has(messageId) ||
-      this.acceptedAnnotationIds.has(payload.annotationId) ||
+      this.rowIdsByAnnotationId.has(payload.annotationId) ||
       payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
       payload.rowId !== activeRequest.rowId ||
       payload.activationId !== activeRequest.activationId
@@ -199,9 +206,22 @@ export class HostBridgeController {
     }
 
     this.acceptedMessageIds.add(messageId);
-    this.acceptedAnnotationIds.add(payload.annotationId);
+    this.rowIdsByAnnotationId.set(payload.annotationId, payload.rowId);
     this.activeRequest = null;
     this.callbacks.onMeasurementAdded(payload);
+  }
+
+  private acceptMeasurementUpdate(messageId: string, payload: MeasurementUpdatedPayload): void {
+    if (
+      this.acceptedMessageIds.has(messageId) ||
+      payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
+      this.rowIdsByAnnotationId.get(payload.annotationId) !== payload.rowId
+    ) {
+      return;
+    }
+
+    this.acceptedMessageIds.add(messageId);
+    this.callbacks.onMeasurementUpdated(payload);
   }
 
   private flushPendingActivation(): void {

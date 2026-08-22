@@ -290,6 +290,7 @@ export function App() {
           dispatch({ type: 'activationRejected', ...request, reason }),
         onActivationReset: request => dispatch({ type: 'activationReset', ...request }),
         onMeasurementAdded: payload => dispatch({ type: 'measurementReceived', payload }),
+        onMeasurementUpdated: payload => dispatch({ type: 'measurementUpdated', payload }),
         onViewerLoading: () => dispatch({ type: 'viewerLoading' }),
       },
     });

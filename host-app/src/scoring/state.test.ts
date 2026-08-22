@@ -1,4 +1,5 @@
 import { initialScoringState, scoringReducer, type ScoringState } from './state';
+import { calculateAreaTotals } from './totals';
 
 describe('scoringReducer', () => {
   it('adds any number of independent waiting rows', () => {
@@ -147,6 +148,47 @@ describe('scoringReducer', () => {
       annotationId: 'annotation-1',
       measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
     });
+  });
+
+  it('updates a completed correlated measurement in the current Viewer session', () => {
+    const readyState: ScoringState = {
+      connection: {
+        status: 'ready',
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+      },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'ready',
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+        },
+      ],
+    };
+    const payload = {
+      viewerInstanceId: 'viewer-1',
+      rowId: 'row-1',
+      annotationId: 'annotation-1',
+      measurement: { kind: 'area' as const, value: 50.25, unit: 'mm2' as const, rawUnit: 'mm²' },
+    };
+
+    const staleSession = scoringReducer(readyState, {
+      type: 'measurementUpdated',
+      payload: { ...payload, viewerInstanceId: 'viewer-stale' },
+    });
+    const wrongAnnotation = scoringReducer(readyState, {
+      type: 'measurementUpdated',
+      payload: { ...payload, annotationId: 'annotation-other' },
+    });
+    const updated = scoringReducer(readyState, { type: 'measurementUpdated', payload });
+
+    expect(staleSession).toBe(readyState);
+    expect(wrongAnnotation).toBe(readyState);
+    expect(updated.rows[0]?.measurement?.value).toBe(50.25);
+    expect(calculateAreaTotals(updated.rows)).toEqual([
+      { key: 'area:mm2', value: 50.25, displayUnit: 'mm²' },
+    ]);
   });
 
   it('stores viewer capabilities and exposes unsupported-tool errors', () => {
