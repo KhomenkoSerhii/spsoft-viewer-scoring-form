@@ -41,6 +41,7 @@ const statusCopy: Record<MeasurementRowStatus, { label: string; description: str
   queued: { label: 'У черзі', description: 'Очікуємо готовність Viewer' },
   drawing: { label: 'Малювання…', description: 'Намалюйте еліпс на зображенні' },
   ready: { label: 'Готово', description: 'Вимірювання отримано' },
+  deleting: { label: 'Видалення…', description: 'Очікуємо підтвердження від Viewer' },
   error: { label: 'Помилка', description: 'Не вдалося активувати інструмент' },
 };
 
@@ -106,10 +107,18 @@ interface MeasurementRowItemProps {
   index: number;
   onActivate: (rowId: string) => void;
   onCancel: (row: MeasurementRow) => void;
+  onDelete: (row: MeasurementRow) => void;
   row: MeasurementRow;
 }
 
-function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: MeasurementRowItemProps) {
+function MeasurementRowItem({
+  busy,
+  index,
+  onActivate,
+  onCancel,
+  onDelete,
+  row,
+}: MeasurementRowItemProps) {
   const copy = statusCopy[row.status];
   const isActive = row.status === 'queued' || row.status === 'drawing';
   const canActivate = (row.status === 'waiting' || row.status === 'error') && !busy;
@@ -124,7 +133,10 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
         : copy.description;
 
   return (
-    <article className={`measurement-row measurement-row--${row.status}`}>
+    <article
+      className={`measurement-row measurement-row--${row.status}`}
+      data-row-id={row.id}
+    >
       <div className="measurement-row__heading">
         <div>
           <span className="measurement-row__index">{String(index + 1).padStart(2, '0')}</span>
@@ -141,7 +153,15 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
         <p>{errorDescription}</p>
       </div>
 
-      {isActive ? (
+      {row.status === 'deleting' ? (
+        <button
+          className="measurement-row__button measurement-row__button--delete"
+          type="button"
+          disabled
+        >
+          Видалення…
+        </button>
+      ) : isActive ? (
         <button
           className="measurement-row__button measurement-row__button--cancel"
           type="button"
@@ -149,7 +169,15 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
         >
           Скасувати
         </button>
-      ) : row.status !== 'ready' ? (
+      ) : row.status === 'ready' ? (
+        <button
+          className="measurement-row__button measurement-row__button--delete"
+          type="button"
+          onClick={() => onDelete(row)}
+        >
+          Видалити
+        </button>
+      ) : (
         <button
           className="measurement-row__button"
           type="button"
@@ -158,7 +186,7 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
         >
           Активувати Ellipse
         </button>
-      ) : null}
+      )}
     </article>
   );
 }
@@ -168,6 +196,7 @@ interface ScoringPanelProps {
   onActivate: (rowId: string) => void;
   onAddRow: () => void;
   onCancel: (row: MeasurementRow) => void;
+  onDelete: (row: MeasurementRow) => void;
   state: ScoringState;
 }
 
@@ -176,6 +205,7 @@ function ScoringPanel({
   onActivate,
   onAddRow,
   onCancel,
+  onDelete,
   state,
 }: ScoringPanelProps) {
   const connected = state.connection.status === 'ready';
@@ -235,6 +265,7 @@ function ScoringPanel({
               busy={busy && row.status !== 'queued' && row.status !== 'drawing'}
               onActivate={onActivate}
               onCancel={onCancel}
+              onDelete={onDelete}
             />
           ))
         ) : (
@@ -290,6 +321,7 @@ export function App() {
           dispatch({ type: 'activationRejected', ...request, reason }),
         onActivationReset: request => dispatch({ type: 'activationReset', ...request }),
         onMeasurementAdded: payload => dispatch({ type: 'measurementReceived', payload }),
+        onMeasurementRemoved: payload => dispatch({ type: 'measurementRemoved', payload }),
         onMeasurementUpdated: payload => dispatch({ type: 'measurementUpdated', payload }),
         onViewerLoading: () => dispatch({ type: 'viewerLoading' }),
       },
@@ -343,6 +375,21 @@ export function App() {
     dispatch({ type: 'activationCancelled', rowId: row.id, activationId: row.activationId });
   }, []);
 
+  const handleDelete = useCallback((row: MeasurementRow) => {
+    if (!row.annotationId) {
+      return;
+    }
+
+    const outcome = bridgeRef.current?.removeMeasurement({
+      rowId: row.id,
+      annotationId: row.annotationId,
+    });
+
+    if (outcome === 'sent') {
+      dispatch({ type: 'deletionRequested', rowId: row.id, annotationId: row.annotationId });
+    }
+  }, []);
+
   return (
     <main className="workspace">
       <ViewerFrame
@@ -356,6 +403,7 @@ export function App() {
         onAddRow={handleAddRow}
         onActivate={handleActivate}
         onCancel={handleCancel}
+        onDelete={handleDelete}
       />
     </main>
   );

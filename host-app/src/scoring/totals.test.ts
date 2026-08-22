@@ -59,4 +59,12 @@ describe('calculateAreaTotals', () => {
       { key: 'area:mm2', value: 7.125, displayUnit: 'mm²' },
     ]);
   });
+
+  it('keeps a measurement in totals while Viewer deletion is pending', () => {
+    const deletingRow = { ...readyRow('deleting', 7.125, 'mm²'), status: 'deleting' as const };
+
+    expect(calculateAreaTotals([deletingRow])).toEqual([
+      { key: 'area:mm2', value: 7.125, displayUnit: 'mm²' },
+    ]);
+  });
 });

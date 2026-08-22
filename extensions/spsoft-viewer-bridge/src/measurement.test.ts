@@ -1,4 +1,8 @@
-import { extractEllipticalRoiAnnotationId, extractEllipticalRoiMeasurement } from './measurement';
+import {
+  extractEllipticalRoiAnnotationId,
+  extractEllipticalRoiMeasurement,
+  extractRemovedAnnotationId,
+} from './measurement';
 
 describe('extractEllipticalRoiMeasurement', () => {
   it('identifies an ellipse before its cached statistics are ready', () => {
@@ -87,4 +91,17 @@ describe('extractEllipticalRoiMeasurement', () => {
   ])('ignores unrelated or malformed payload %#', event => {
     expect(extractEllipticalRoiMeasurement(event)).toBeNull();
   });
+});
+
+describe('extractRemovedAnnotationId', () => {
+  it('extracts the identifier from an OHIF removal event', () => {
+    expect(extractRemovedAnnotationId({ measurement: 'annotation-1' })).toBe('annotation-1');
+  });
+
+  it.each([undefined, {}, { measurement: '' }, { measurement: { uid: 'annotation-1' } }])(
+    'ignores malformed removal payload %#',
+    event => {
+      expect(extractRemovedAnnotationId(event)).toBeNull();
+    }
+  );
 });

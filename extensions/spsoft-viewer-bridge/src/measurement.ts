@@ -34,6 +34,14 @@ export function extractEllipticalRoiAnnotationId(event: unknown): string | null 
   return measurement ? (measurement.uid as string) : null;
 }
 
+export function extractRemovedAnnotationId(event: unknown): string | null {
+  if (!isRecord(event) || typeof event.measurement !== 'string' || !event.measurement.trim()) {
+    return null;
+  }
+
+  return event.measurement;
+}
+
 export function extractEllipticalRoiMeasurement(event: unknown): ExtractedAreaMeasurement | null {
   const measurement = getEllipticalRoiMeasurement(event);
 

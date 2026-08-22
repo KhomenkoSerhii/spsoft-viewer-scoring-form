@@ -24,6 +24,7 @@ export interface ViewerReadyPayload {
   viewerInstanceId: string;
   supportedTools: SupportedToolName[];
   capabilities: {
+    measurementDeletion: boolean;
     measurementUpdates: boolean;
   };
 }
@@ -42,6 +43,12 @@ export interface DeactivateToolPayload {
   reason: DeactivationReason;
 }
 
+export interface RemoveMeasurementPayload {
+  targetViewerInstanceId: string;
+  rowId: string;
+  annotationId: string;
+}
+
 export interface MeasurementAddedPayload {
   viewerInstanceId: string;
   rowId: string;
@@ -57,12 +64,20 @@ export interface MeasurementUpdatedPayload {
   measurement: AreaMeasurement;
 }
 
+export interface MeasurementRemovedPayload {
+  viewerInstanceId: string;
+  rowId: string;
+  annotationId: string;
+}
+
 export interface BridgePayloadByType {
   VIEWER_READY: ViewerReadyPayload;
   ACTIVATE_TOOL: ActivateToolPayload;
   DEACTIVATE_TOOL: DeactivateToolPayload;
+  REMOVE_MEASUREMENT: RemoveMeasurementPayload;
   MEASUREMENT_ADDED: MeasurementAddedPayload;
   MEASUREMENT_UPDATED: MeasurementUpdatedPayload;
+  MEASUREMENT_REMOVED: MeasurementRemovedPayload;
 }
 
 export interface BridgeMessageFor<TType extends BridgeMessageType> {
@@ -79,6 +94,7 @@ export type BridgeMessage = {
 
 export type HostToViewerMessage =
   | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL>
-  | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL>;
+  | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL>
+  | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT>;
 
 export type ViewerToHostMessage = Exclude<BridgeMessage, HostToViewerMessage>;

@@ -1,12 +1,19 @@
 import type {
   AreaMeasurement,
   MeasurementAddedPayload,
+  MeasurementRemovedPayload,
   MeasurementUpdatedPayload,
   SupportedToolName,
   ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
 
-export type MeasurementRowStatus = 'waiting' | 'queued' | 'drawing' | 'ready' | 'error';
+export type MeasurementRowStatus =
+  | 'waiting'
+  | 'queued'
+  | 'drawing'
+  | 'ready'
+  | 'deleting'
+  | 'error';
 
 export interface MeasurementRow {
   activationId?: string;
@@ -47,6 +54,8 @@ export type ScoringAction =
   | { type: 'activationReset'; activationId: string; rowId: string }
   | { type: 'measurementReceived'; payload: MeasurementAddedPayload }
   | { type: 'measurementUpdated'; payload: MeasurementUpdatedPayload }
+  | { type: 'deletionRequested'; annotationId: string; rowId: string }
+  | { type: 'measurementRemoved'; payload: MeasurementRemovedPayload }
   | { type: 'viewerLoading' }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
@@ -155,6 +164,41 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       );
     }
 
+    case 'deletionRequested':
+      return updateRow(state, action.rowId, row =>
+        row.status === 'ready' && row.annotationId === action.annotationId
+          ? { ...row, status: 'deleting' }
+          : row
+      );
+
+    case 'measurementRemoved': {
+      if (
+        state.connection.status !== 'ready' ||
+        state.connection.viewerInstanceId !== action.payload.viewerInstanceId
+      ) {
+        return state;
+      }
+
+      const row = state.rows.find(item => item.id === action.payload.rowId);
+
+      if (
+        !row ||
+        (row.status !== 'ready' && row.status !== 'deleting') ||
+        row.annotationId !== action.payload.annotationId
+      ) {
+        return state;
+      }
+
+      if (row.status === 'deleting') {
+        return { ...state, rows: state.rows.filter(item => item.id !== row.id) };
+      }
+
+      return updateRow(state, row.id, currentRow => ({
+        id: currentRow.id,
+        status: 'waiting',
+      }));
+    }
+
     case 'activationCancelled':
     case 'activationReset':
       return updateMatchingActivation(state, action, row => ({
@@ -167,7 +211,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
 function resetCompletedRows(rows: MeasurementRow[]): MeasurementRow[] {
   let changed = false;
   const resetRows = rows.map(row => {
-    if (row.status !== 'ready') {
+    if (row.status !== 'ready' && row.status !== 'deleting') {
       return row;
     }
 

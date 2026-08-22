@@ -191,13 +191,85 @@ describe('scoringReducer', () => {
     ]);
   });
 
+  it('removes a host-deleted row only after the Viewer confirms deletion', () => {
+    const readyState: ScoringState = {
+      connection: {
+        status: 'ready',
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+      },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'ready',
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+        },
+      ],
+    };
+    const deleting = scoringReducer(readyState, {
+      type: 'deletionRequested',
+      rowId: 'row-1',
+      annotationId: 'annotation-1',
+    });
+    const removed = scoringReducer(deleting, {
+      type: 'measurementRemoved',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+    });
+
+    expect(deleting.rows[0]?.status).toBe('deleting');
+    expect(calculateAreaTotals(deleting.rows)[0]?.value).toBe(42.75);
+    expect(removed.rows).toEqual([]);
+  });
+
+  it('clears a row when its annotation is deleted directly in the Viewer', () => {
+    const readyState: ScoringState = {
+      connection: {
+        status: 'ready',
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+      },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'ready',
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+        },
+      ],
+    };
+    const staleRemoval = scoringReducer(readyState, {
+      type: 'measurementRemoved',
+      payload: {
+        viewerInstanceId: 'stale-viewer',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+    });
+    const cleared = scoringReducer(readyState, {
+      type: 'measurementRemoved',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+    });
+
+    expect(staleRemoval).toBe(readyState);
+    expect(cleared.rows).toEqual([{ id: 'row-1', status: 'waiting' }]);
+  });
+
   it('stores viewer capabilities and exposes unsupported-tool errors', () => {
     const connected = scoringReducer(initialScoringState, {
       type: 'viewerReady',
       payload: {
         viewerInstanceId: 'viewer-1',
         supportedTools: [],
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementDeletion: false, measurementUpdates: false },
       },
     });
     const withRow = scoringReducer(connected, { type: 'rowAdded', rowId: 'row-1' });
@@ -298,7 +370,7 @@ describe('scoringReducer', () => {
       payload: {
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementDeletion: false, measurementUpdates: false },
       },
     });
     const stateWithCompletedRow = {
@@ -318,7 +390,7 @@ describe('scoringReducer', () => {
       payload: {
         viewerInstanceId: 'viewer-2',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementDeletion: false, measurementUpdates: false },
       },
     });
 

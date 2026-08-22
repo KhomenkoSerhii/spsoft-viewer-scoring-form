@@ -391,6 +391,11 @@ h1 {
   background: #a54b43;
 }
 
+.measurement-row--deleting .measurement-row__status span {
+  background: #a54b43;
+  animation: status-pulse 1.6s ease-in-out infinite;
+}
+
 .measurement-row__button {
   width: 100%;
   margin-top: 14px;
@@ -423,6 +428,17 @@ h1 {
 }
 
 .measurement-row__button--cancel:hover:not(:disabled) {
+  border-color: #a54b43;
+  background: #f1ded9;
+}
+
+.measurement-row__button--delete {
+  border-color: #c8aaa6;
+  color: #7f3e38;
+  background: #f5eae7;
+}
+
+.measurement-row__button--delete:hover:not(:disabled) {
   border-color: #a54b43;
   background: #f1ded9;
 }

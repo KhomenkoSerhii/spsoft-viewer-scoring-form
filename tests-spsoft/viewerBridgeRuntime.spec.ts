@@ -9,6 +9,12 @@ interface CapturedBridgeMessage {
 }
 
 interface CornerstoneWindow extends Window {
+  services?: {
+    measurementService?: {
+      getMeasurements(): Array<{ uid?: string }>;
+      remove(measurementId: string): void;
+    };
+  };
   cornerstone?: {
     getRenderingEngines(): Array<{
       getViewports(): Array<{
@@ -21,6 +27,7 @@ interface CornerstoneWindow extends Window {
     annotation: {
       state: {
         getAllAnnotations(): Array<{
+          annotationUID?: string;
           data?: { handles?: { points?: number[][] } };
           metadata?: { toolName?: string };
         }>;
@@ -276,7 +283,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
 
   await expect(measurementRow.getByText('Готово')).toBeVisible();
   await expect(measurementRow.locator('output')).toContainText('mm²');
-  await expect(measurementRow.getByRole('button')).toHaveCount(0);
+  await expect(measurementRow.getByRole('button', { name: 'Видалити' })).toBeVisible();
 
   const valueBeforeDrag = await measurementRow.locator('output').textContent();
   const updateCountBeforeDrag = await page.evaluate(() => {
@@ -447,6 +454,111 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
 
   expect(correlatedMessageCount).toBe(3);
 
+  await thirdMeasurementRow.getByRole('button', { name: 'Видалити' }).click();
+  await expect(page.getByRole('article')).toHaveCount(2);
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return (
+            cornerstoneWindow.cornerstoneTools?.annotation.state
+              .getAllAnnotations()
+              .filter(annotation => annotation.metadata?.toolName === 'EllipticalROI').length ?? 0
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(2);
+  await expect
+    .poll(() =>
+      viewerFrame.locator('body').evaluate(() => {
+        const bridgeWindow = window as Window & {
+          __spsoftBridgeMessages: CapturedBridgeMessage[];
+        };
+        return bridgeWindow.__spsoftBridgeMessages.filter(
+          message =>
+            message.origin === 'http://localhost:5173' &&
+            message.data?.type === 'REMOVE_MEASUREMENT'
+        ).length;
+      })
+    )
+    .toBe(1);
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const bridgeWindow = window as Window & {
+          __spsoftBridgeMessages: CapturedBridgeMessage[];
+        };
+        return bridgeWindow.__spsoftBridgeMessages.filter(
+          message =>
+            message.origin === 'http://localhost:3000' &&
+            message.data?.type === 'MEASUREMENT_REMOVED'
+        ).length;
+      })
+    )
+    .toBe(1);
+
+  const viewerDeletionAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    const measurementService = cornerstoneWindow.services?.measurementService;
+
+    if (!measurementService) {
+      throw new Error('OHIF MeasurementService is unavailable.');
+    }
+
+    const annotationId = measurementService
+      .getMeasurements()
+      .find(measurement => typeof measurement.uid === 'string')?.uid;
+
+    if (!annotationId) {
+      throw new Error('OHIF MeasurementService has no removable correlated measurement.');
+    }
+
+    measurementService.remove(annotationId);
+    return annotationId;
+  });
+  const viewerDeletionRowId = await page.evaluate(annotationId => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+    const addedMessage = bridgeWindow.__spsoftBridgeMessages.find(
+      message =>
+        message.origin === 'http://localhost:3000' &&
+        message.data?.type === 'MEASUREMENT_ADDED' &&
+        message.data.payload?.annotationId === annotationId
+    );
+    const rowId = addedMessage?.data.payload?.rowId;
+
+    if (typeof rowId !== 'string') {
+      throw new Error('The correlated row ID is missing for Viewer deletion.');
+    }
+
+    return rowId;
+  }, viewerDeletionAnnotationId);
+  const viewerDeletedRow = page.locator(`[data-row-id="${viewerDeletionRowId}"]`);
+  await expect(viewerDeletedRow.getByText('Очікує')).toBeVisible();
+  await expect(viewerDeletedRow.locator('output')).toHaveText('—');
+  await expect(viewerDeletedRow.getByRole('button', { name: 'Активувати Ellipse' })).toBeVisible();
+  const remainingMeasurementValue = await page
+    .locator('.measurement-row--ready .measurement-row__value')
+    .textContent();
+  await expect(page.locator('.scoring-total output')).toHaveText(remainingMeasurementValue ?? '');
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return (
+            cornerstoneWindow.cornerstoneTools?.annotation.state
+              .getAllAnnotations()
+              .filter(annotation => annotation.metadata?.toolName === 'EllipticalROI').length ?? 0
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(1);
+
   const viewportBox = await activeViewport.boundingBox();
 
   if (!viewportBox) {
@@ -491,7 +603,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
         }),
       { timeout: 30_000 }
     )
-    .toBe(4);
+    .toBe(2);
 
   await expect
     .poll(() =>
@@ -524,7 +636,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await viewerFrame.locator('body').evaluate(() => window.location.reload());
   await expect(measurementRow.getByText('Очікує')).toBeVisible();
   await expect(measurementRow.locator('output')).toHaveText('—');
-  await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(3);
+  await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(2);
   await expect(page.locator('.scoring-total output')).toHaveText('—');
 
   await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
@@ -623,7 +735,7 @@ test('host queues early activation and ignores malformed messages from the Viewe
       payload: {
         viewerInstanceId: 'forged-viewer',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementDeletion: false, measurementUpdates: false },
       },
     };
 

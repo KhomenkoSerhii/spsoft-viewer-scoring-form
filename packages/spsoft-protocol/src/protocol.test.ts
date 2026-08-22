@@ -46,7 +46,7 @@ describe('parseBridgeMessage', () => {
       {
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: true },
+        capabilities: { measurementDeletion: true, measurementUpdates: true },
       },
       'message-ready'
     ),
@@ -71,6 +71,15 @@ describe('parseBridgeMessage', () => {
       'message-deactivate'
     ),
     createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+      {
+        targetViewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+      'message-remove'
+    ),
+    createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
       {
         viewerInstanceId: 'viewer-1',
@@ -91,6 +100,15 @@ describe('parseBridgeMessage', () => {
       },
       'message-updated'
     ),
+    createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
+      {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+      'message-removed'
+    ),
   ])('accepts $type', message => {
     expect(parseBridgeMessage(message)).toEqual(message);
   });
@@ -107,7 +125,7 @@ describe('parseBridgeMessage', () => {
       {
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementDeletion: false, measurementUpdates: false },
       },
       'message-1'
     );
@@ -225,22 +243,20 @@ describe('parseBridgeMessage', () => {
 describe('message direction guards', () => {
   it('distinguishes host commands from viewer events', () => {
     const hostCommand = createBridgeMessage(
-      BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL,
+      BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
       {
         targetViewerInstanceId: 'viewer-1',
         rowId: 'row-1',
-        activationId: 'activation-1',
-        reason: 'superseded',
+        annotationId: 'annotation-1',
       },
       'message-host'
     );
     const viewerEvent = createBridgeMessage(
-      BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED,
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
       {
         viewerInstanceId: 'viewer-1',
         rowId: 'row-1',
         annotationId: 'annotation-1',
-        measurement: areaMeasurement,
       },
       'message-viewer'
     );
