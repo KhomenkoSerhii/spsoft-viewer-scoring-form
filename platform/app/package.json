@@ -74,6 +74,7 @@
     "@ohif/mode-ultrasound-pleura-bline": "3.12.10",
     "@ohif/ui": "3.12.10",
     "@ohif/ui-next": "3.12.10",
+    "@spsoft/extension-viewer-bridge": "0.1.0",
     "@svgr/webpack": "8.1.0",
     "@types/react": "18.3.23",
     "classnames": "2.5.1",

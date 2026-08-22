@@ -82,6 +82,7 @@ export const extensionDependencies = {
   '@ohif/extension-cornerstone-dicom-rt': '^3.0.0',
   '@ohif/extension-dicom-pdf': '^3.0.1',
   '@ohif/extension-dicom-video': '^3.0.1',
+  '@spsoft/extension-viewer-bridge': '^0.1.0',
 };
 
 export const sopClassHandlers = [

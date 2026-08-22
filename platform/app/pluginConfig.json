@@ -65,6 +65,11 @@
     {
       "packageName": "@ohif/extension-ultrasound-pleura-bline",
       "version": "3.0.0"
+    },
+    {
+      "packageName": "@spsoft/extension-viewer-bridge",
+      "default": false,
+      "version": "0.1.0"
     }
   ],
   "modes": [
