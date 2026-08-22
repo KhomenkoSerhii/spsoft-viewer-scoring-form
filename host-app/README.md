@@ -48,7 +48,13 @@ can be queued or drawing at a time. Activation requested before the Viewer is re
 sent after the handshake; **Cancel** drops a queued request or restores the Viewer to Pan.
 
 Completing the ellipse stores the correlated annotation ID and displays its normalized area in the
-matching row. Totals are intentionally added in the following focused PR.
+matching row. Accepted message and annotation IDs are retained for the current Viewer session so a
+duplicate cannot complete another row. Reloading the iframe invalidates completed bindings and
+returns those rows to the waiting state because the new Viewer no longer contains their annotations.
+
+Values are formatted for the Ukrainian locale only in the view; the reducer keeps the original
+numeric value and exact OHIF unit. Totals are intentionally added in the following focused PR, so
+the footer displays an em dash until that calculation exists.
 
 ## Checks
 

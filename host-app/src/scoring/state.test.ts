@@ -154,4 +154,64 @@ describe('scoringReducer', () => {
       error: 'unsupported',
     });
   });
+
+  it('clears completed bindings while the viewer reloads', () => {
+    const readyState = {
+      connection: {
+        status: 'ready' as const,
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI' as const],
+      },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'ready' as const,
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area' as const, value: 42, unit: 'mm2' as const, rawUnit: 'mm²' },
+        },
+        { id: 'row-2', status: 'waiting' as const },
+      ],
+    };
+
+    const loading = scoringReducer(readyState, { type: 'viewerLoading' });
+
+    expect(loading.connection).toEqual({ status: 'connecting' });
+    expect(loading.rows).toEqual([
+      { id: 'row-1', status: 'waiting' },
+      { id: 'row-2', status: 'waiting' },
+    ]);
+  });
+
+  it('also clears completed bindings when a new session arrives without a load callback', () => {
+    const connected = scoringReducer(initialScoringState, {
+      type: 'viewerReady',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+        capabilities: { measurementUpdates: false },
+      },
+    });
+    const stateWithCompletedRow = {
+      ...connected,
+      rows: [
+        {
+          id: 'row-1',
+          status: 'ready' as const,
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area' as const, value: 42, unit: 'mm2' as const, rawUnit: 'mm²' },
+        },
+      ],
+    };
+
+    const nextSession = scoringReducer(stateWithCompletedRow, {
+      type: 'viewerReady',
+      payload: {
+        viewerInstanceId: 'viewer-2',
+        supportedTools: ['EllipticalROI'],
+        capabilities: { measurementUpdates: false },
+      },
+    });
+
+    expect(nextSession.rows).toEqual([{ id: 'row-1', status: 'waiting' }]);
+  });
 });

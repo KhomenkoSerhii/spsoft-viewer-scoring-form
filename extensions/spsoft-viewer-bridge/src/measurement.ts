@@ -11,7 +11,7 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-export function extractEllipticalRoiMeasurement(event: unknown): ExtractedAreaMeasurement | null {
+function getEllipticalRoiMeasurement(event: unknown): UnknownRecord | null {
   if (!isRecord(event) || !isRecord(event.measurement)) {
     return null;
   }
@@ -21,9 +21,23 @@ export function extractEllipticalRoiMeasurement(event: unknown): ExtractedAreaMe
   if (
     measurement.toolName !== 'EllipticalROI' ||
     typeof measurement.uid !== 'string' ||
-    !measurement.uid.trim() ||
-    !isRecord(measurement.data)
+    !measurement.uid.trim()
   ) {
+    return null;
+  }
+
+  return measurement;
+}
+
+export function extractEllipticalRoiAnnotationId(event: unknown): string | null {
+  const measurement = getEllipticalRoiMeasurement(event);
+  return measurement ? (measurement.uid as string) : null;
+}
+
+export function extractEllipticalRoiMeasurement(event: unknown): ExtractedAreaMeasurement | null {
+  const measurement = getEllipticalRoiMeasurement(event);
+
+  if (!measurement || !isRecord(measurement.data)) {
     return null;
   }
 
@@ -34,7 +48,7 @@ export function extractEllipticalRoiMeasurement(event: unknown): ExtractedAreaMe
 
     try {
       return {
-        annotationId: measurement.uid,
+        annotationId: measurement.uid as string,
         measurement: createAreaMeasurement(value.area, value.areaUnit),
       };
     } catch {

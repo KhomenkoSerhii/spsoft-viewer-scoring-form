@@ -1,6 +1,19 @@
-import { extractEllipticalRoiMeasurement } from './measurement';
+import { extractEllipticalRoiAnnotationId, extractEllipticalRoiMeasurement } from './measurement';
 
 describe('extractEllipticalRoiMeasurement', () => {
+  it('identifies an ellipse before its cached statistics are ready', () => {
+    const event = {
+      measurement: {
+        uid: 'annotation-pending',
+        toolName: 'EllipticalROI',
+        data: {},
+      },
+    };
+
+    expect(extractEllipticalRoiAnnotationId(event)).toBe('annotation-pending');
+    expect(extractEllipticalRoiMeasurement(event)).toBeNull();
+  });
+
   it('extracts and normalizes area from the real OHIF measurement shape', () => {
     expect(
       extractEllipticalRoiMeasurement({

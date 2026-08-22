@@ -49,6 +49,7 @@ function createHarness() {
     onActivationReset: jest.fn(),
     onActivationSent: jest.fn(),
     onMeasurementAdded: jest.fn(),
+    onViewerLoading: jest.fn(),
     onViewerReady: jest.fn(),
   };
   const controller = new HostBridgeController({
@@ -89,10 +90,14 @@ function createHarness() {
 
   const dispatchMeasurement = ({
     activationId = 'activation-1',
+    annotationId = 'annotation-1',
+    messageId = 'measurement-message',
     rowId = 'row-1',
     viewerInstanceId = 'viewer-1',
   }: {
     activationId?: string;
+    annotationId?: string;
+    messageId?: string;
     rowId?: string;
     viewerInstanceId?: string;
   } = {}) => {
@@ -100,7 +105,7 @@ function createHarness() {
       viewerInstanceId,
       rowId,
       activationId,
-      annotationId: 'annotation-1',
+      annotationId,
       measurement: {
         kind: 'area' as const,
         value: 42.75,
@@ -109,7 +114,7 @@ function createHarness() {
       },
     };
     hostWindow.dispatch(
-      createBridgeMessage(BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED, payload, 'measurement-message'),
+      createBridgeMessage(BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED, payload, messageId),
       'http://localhost:3000',
       viewerWindow
     );
@@ -232,6 +237,19 @@ describe('HostBridgeController', () => {
     expect(callbacks.onActivationReset).toHaveBeenCalledWith(activation);
   });
 
+  it('invalidates the current session while the iframe reloads', () => {
+    const { activation, announceReady, callbacks, controller } = createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+
+    controller.notifyViewerLoading();
+
+    expect(callbacks.onActivationReset).toHaveBeenCalledWith(activation);
+    expect(callbacks.onViewerLoading).toHaveBeenCalledTimes(1);
+    expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('queued');
+  });
+
   it('accepts one measurement matching the active Viewer session and activation', () => {
     const { activation, announceReady, callbacks, controller, dispatchMeasurement } =
       createHarness();
@@ -260,6 +278,35 @@ describe('HostBridgeController', () => {
 
     expect(callbacks.onMeasurementAdded).not.toHaveBeenCalled();
     expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('busy');
+  });
+
+  it('rejects repeated message and annotation identifiers across activations', () => {
+    const { activation, announceReady, callbacks, controller, dispatchMeasurement } =
+      createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+    dispatchMeasurement();
+
+    const secondActivation = { ...activation, activationId: 'activation-2' };
+    expect(controller.activate(secondActivation)).toBe('sent');
+    dispatchMeasurement({ activationId: 'activation-2', messageId: 'measurement-message-2' });
+    dispatchMeasurement({
+      activationId: 'activation-2',
+      annotationId: 'annotation-2',
+      messageId: 'measurement-message',
+    });
+
+    expect(callbacks.onMeasurementAdded).toHaveBeenCalledTimes(1);
+    expect(controller.activate({ ...activation, activationId: 'activation-3' })).toBe('busy');
+
+    dispatchMeasurement({
+      activationId: 'activation-2',
+      annotationId: 'annotation-2',
+      messageId: 'measurement-message-2',
+    });
+
+    expect(callbacks.onMeasurementAdded).toHaveBeenCalledTimes(2);
   });
 
   it('deactivates an armed tool and removes its listener during disposal', () => {

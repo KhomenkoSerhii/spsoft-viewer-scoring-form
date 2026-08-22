@@ -45,6 +45,7 @@ export type ScoringAction =
     }
   | { type: 'activationReset'; activationId: string; rowId: string }
   | { type: 'measurementReceived'; payload: MeasurementAddedPayload }
+  | { type: 'viewerLoading' }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
 export const initialScoringState: ScoringState = {
@@ -64,7 +65,17 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         rows: [...state.rows, { id: action.rowId, status: 'waiting' }],
       };
 
-    case 'viewerReady':
+    case 'viewerLoading':
+      return {
+        connection: { status: 'connecting' },
+        rows: resetCompletedRows(state.rows),
+      };
+
+    case 'viewerReady': {
+      const changedViewerSession =
+        state.connection.status === 'ready' &&
+        state.connection.viewerInstanceId !== action.payload.viewerInstanceId;
+
       return {
         ...state,
         connection: {
@@ -72,7 +83,9 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           viewerInstanceId: action.payload.viewerInstanceId,
           supportedTools: action.payload.supportedTools,
         },
+        rows: changedViewerSession ? resetCompletedRows(state.rows) : state.rows,
       };
+    }
 
     case 'activationRequested': {
       if (hasActiveDrawing(state)) {
@@ -132,6 +145,20 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         status: 'waiting',
       }));
   }
+}
+
+function resetCompletedRows(rows: MeasurementRow[]): MeasurementRow[] {
+  let changed = false;
+  const resetRows = rows.map(row => {
+    if (row.status !== 'ready') {
+      return row;
+    }
+
+    changed = true;
+    return { id: row.id, status: 'waiting' } satisfies MeasurementRow;
+  });
+
+  return changed ? resetRows : rows;
 }
 
 function updateMatchingActivation(

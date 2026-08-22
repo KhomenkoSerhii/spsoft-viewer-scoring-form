@@ -48,7 +48,10 @@ class FakeEventService implements BridgeEventService {
 
 class FakeMeasurementService extends FakeEventService {
   constructor() {
-    super({ MEASUREMENT_ADDED: 'measurement-added' });
+    super({
+      MEASUREMENT_ADDED: 'measurement-added',
+      MEASUREMENT_UPDATED: 'measurement-updated',
+    });
   }
 }
 
@@ -383,6 +386,82 @@ describe('ViewerBridgeController measurement correlation', () => {
 
     expect(bridgeWindow.postedMessages).toHaveLength(2);
   });
+
+  it('waits for a matching update when ellipse statistics are delayed', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady, measurementService } =
+      createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-pending',
+        toolName: 'EllipticalROI',
+        data: {},
+      },
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'other-annotation',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 10, areaUnit: 'mm²' } },
+      },
+    });
+
+    expect(bridgeWindow.postedMessages).toHaveLength(1);
+    expect(commandsManager.runCommand).toHaveBeenCalledTimes(1);
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'annotation-pending',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 55.5, areaUnit: 'mm²' } },
+      },
+    });
+
+    expect(bridgeWindow.postedMessages).toHaveLength(2);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
+        payload: expect.objectContaining({
+          annotationId: 'annotation-pending',
+          measurement: expect.objectContaining({ value: 55.5 }),
+        }),
+      })
+    );
+    expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
+      toolName: 'Pan',
+    });
+  });
+
+  it('ignores measurement updates that were not preceded by an armed add event', () => {
+    const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
+    controller.enterMode();
+    makeReady();
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'unarmed-annotation',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 10, areaUnit: 'mm²' } },
+      },
+    });
+
+    expect(bridgeWindow.postedMessages).toHaveLength(1);
+  });
 });
 
 describe('ViewerBridgeController tool commands', () => {
@@ -562,7 +641,7 @@ describe('ViewerBridgeController message boundary', () => {
     expect(bridgeWindow.getListenerCount()).toBe(1);
     expect(viewportGridService.getListenerCount()).toBe(2);
     expect(toolGroupService.getListenerCount()).toBe(2);
-    expect(measurementService.getListenerCount()).toBe(1);
+    expect(measurementService.getListenerCount()).toBe(2);
 
     controller.exitMode();
 

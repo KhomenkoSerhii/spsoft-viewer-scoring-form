@@ -29,6 +29,9 @@ tool through `commandsManager`; cancellation, replacement and mode cleanup resto
 
 The first valid `MEASUREMENT_ADDED` event for the armed ellipse is normalized to the shared area
 contract, correlated with its `rowId` and `activationId`, sent to the host, and followed by a return
-to Pan. Unrelated, malformed and duplicate measurement events are ignored.
+to Pan. If OHIF has not populated `cachedStats` yet, the bridge remembers that annotation and
+finishes it from the matching `MEASUREMENT_UPDATED` event. Unrelated, malformed, unarmed and
+duplicate measurement events are ignored.
 
-Live `MEASUREMENT_UPDATED` synchronization is intentionally deferred to the optional follow-up.
+Live synchronization of later edits remains intentionally deferred to the optional follow-up; the
+current update subscription is only a completion fallback for the one armed annotation.

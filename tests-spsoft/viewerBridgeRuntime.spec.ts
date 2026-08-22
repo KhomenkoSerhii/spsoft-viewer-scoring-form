@@ -15,13 +15,21 @@ interface CornerstoneWindow extends Window {
     }>;
   };
   cornerstoneTools?: {
+    annotation: {
+      state: {
+        getAllAnnotations(): Array<{ metadata?: { toolName?: string } }>;
+      };
+    };
     ToolGroupManager: {
       getAllToolGroups(): Array<{ getActivePrimaryMouseButtonTool(): string | undefined }>;
     };
   };
 }
 
-test('host correlates an OHIF ellipse measurement and supports cancellation', async ({ page }) => {
+test('host correlates ellipses, ignores unarmed tools, and resets after reload', async ({
+  page,
+}) => {
+  test.setTimeout(300_000);
   const runtimeErrors: string[] = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
 
@@ -232,6 +240,8 @@ test('host correlates an OHIF ellipse measurement and supports cancellation', as
 
   await expect(measurementRow.getByText('Готово')).toBeVisible();
   await expect(measurementRow.locator('output')).toContainText('mm²');
+  await expect(measurementRow.getByRole('button')).toHaveCount(0);
+  await expect(page.locator('.scoring-total output')).toHaveText('—');
 
   await expect
     .poll(
@@ -245,6 +255,132 @@ test('host correlates an OHIF ellipse measurement and supports cancellation', as
       { timeout: 30_000 }
     )
     .toBe(true);
+
+  const correlatedMessageCount = await page.evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+    return bridgeWindow.__spsoftBridgeMessages.filter(
+      message =>
+        message.origin === 'http://localhost:3000' && message.data?.type === 'MEASUREMENT_ADDED'
+    ).length;
+  });
+
+  await viewerFrame.locator('[data-cy="MeasurementTools-split-button-secondary"] button').click();
+  const ellipseToolbarButton = viewerFrame.getByRole('menuitem', { name: 'Ellipse' });
+  await expect(ellipseToolbarButton).toBeVisible({ timeout: 10_000 });
+  await ellipseToolbarButton.click();
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  await activeViewport.click({
+    position: { x: viewportBox.width * 0.3, y: viewportBox.height * 0.3 },
+  });
+  await activeViewport.click({
+    position: { x: viewportBox.width * 0.38, y: viewportBox.height * 0.38 },
+  });
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return (
+            cornerstoneWindow.cornerstoneTools?.annotation.state
+              .getAllAnnotations()
+              .filter(annotation => annotation.metadata?.toolName === 'EllipticalROI').length ?? 0
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(2);
+
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const bridgeWindow = window as Window & {
+          __spsoftBridgeMessages: CapturedBridgeMessage[];
+        };
+        return bridgeWindow.__spsoftBridgeMessages.filter(
+          message =>
+            message.origin === 'http://localhost:3000' && message.data?.type === 'MEASUREMENT_ADDED'
+        ).length;
+      })
+    )
+    .toBe(correlatedMessageCount);
+
+  await page.evaluate(() => {
+    const observedWindow = window as Window & { __spsoftConnectionStates: string[] };
+    observedWindow.__spsoftConnectionStates = [];
+    const recordConnectionState = () => {
+      const label = document.querySelector('.connection-state')?.textContent?.trim();
+
+      if (label) {
+        observedWindow.__spsoftConnectionStates.push(label);
+      }
+    };
+    const observer = new MutationObserver(recordConnectionState);
+    observer.observe(document.body, { childList: true, characterData: true, subtree: true });
+    recordConnectionState();
+  });
+  await viewerFrame.locator('body').evaluate(() => window.location.reload());
+  await expect(measurementRow.getByText('Очікує')).toBeVisible();
+  await expect(measurementRow.locator('output')).toHaveText('—');
+
+  await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
+    timeout: 180_000,
+  });
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          const sessionIds = bridgeWindow.__spsoftBridgeMessages.flatMap(message =>
+            message.origin === 'http://localhost:3000' &&
+            message.data?.type === 'VIEWER_READY' &&
+            typeof message.data.payload?.viewerInstanceId === 'string'
+              ? [message.data.payload.viewerInstanceId]
+              : []
+          );
+          return new Set(sessionIds).size;
+        }),
+      { timeout: 180_000 }
+    )
+    .toBe(2);
+
+  await expect(page.getByText('Viewer підключено')).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => (window as Window & { __spsoftConnectionStates: string[] }).__spsoftConnectionStates
+    )
+  ).toContain('Підключення до Viewer…');
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return (
+            cornerstoneWindow.cornerstoneTools?.annotation.state
+              .getAllAnnotations()
+              .filter(annotation => annotation.metadata?.toolName === 'EllipticalROI').length ?? 0
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(0);
 
   await expect(viewerFrame.getByText('Uncaught runtime errors:')).toHaveCount(0);
   expect(runtimeErrors).toEqual([]);

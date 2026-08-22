@@ -46,9 +46,10 @@ const statusCopy: Record<MeasurementRowStatus, { label: string; description: str
 interface ViewerFrameProps {
   bridgeInstalled: boolean;
   iframeRef: React.RefObject<HTMLIFrameElement>;
+  onLoad: () => void;
 }
 
-function ViewerFrame({ bridgeInstalled, iframeRef }: ViewerFrameProps) {
+function ViewerFrame({ bridgeInstalled, iframeRef, onLoad }: ViewerFrameProps) {
   return (
     <section
       className="viewer-panel"
@@ -66,6 +67,7 @@ function ViewerFrame({ bridgeInstalled, iframeRef }: ViewerFrameProps) {
           className="viewer-panel__frame"
           src={viewerUrl.toString()}
           title="OHIF medical image viewer"
+          onLoad={onLoad}
           allow="fullscreen"
           allowFullScreen
         />
@@ -146,7 +148,7 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
         >
           Скасувати
         </button>
-      ) : (
+      ) : row.status !== 'ready' ? (
         <button
           className="measurement-row__button"
           type="button"
@@ -155,7 +157,7 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
         >
           Активувати Ellipse
         </button>
-      )}
+      ) : null}
     </article>
   );
 }
@@ -240,7 +242,7 @@ function ScoringPanel({
 
       <footer className="scoring-total">
         <span>Разом</span>
-        <output>0.0 mm²</output>
+        <output>—</output>
       </footer>
     </aside>
   );
@@ -269,6 +271,7 @@ export function App() {
           dispatch({ type: 'activationRejected', ...request, reason }),
         onActivationReset: request => dispatch({ type: 'activationReset', ...request }),
         onMeasurementAdded: payload => dispatch({ type: 'measurementReceived', payload }),
+        onViewerLoading: () => dispatch({ type: 'viewerLoading' }),
       },
     });
 
@@ -284,6 +287,10 @@ export function App() {
 
   const handleAddRow = useCallback(() => {
     dispatch({ type: 'rowAdded', rowId: window.crypto.randomUUID() });
+  }, []);
+
+  const handleViewerLoad = useCallback(() => {
+    bridgeRef.current?.notifyViewerLoading();
   }, []);
 
   const handleActivate = useCallback((rowId: string) => {
@@ -321,6 +328,7 @@ export function App() {
       <ViewerFrame
         bridgeInstalled={bridgeInstalled}
         iframeRef={iframeRef}
+        onLoad={handleViewerLoad}
       />
       <ScoringPanel
         bridgeInstalled={bridgeInstalled}
