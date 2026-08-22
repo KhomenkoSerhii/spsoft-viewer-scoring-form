@@ -53,8 +53,9 @@ duplicate cannot complete another row. Reloading the iframe invalidates complete
 returns those rows to the waiting state because the new Viewer no longer contains their annotations.
 
 Values are formatted for the Ukrainian locale only in the view; the reducer keeps the original
-numeric value and exact OHIF unit. Totals are intentionally added in the following focused PR, so
-the footer displays an em dash until that calculation exists.
+numeric value and exact OHIF unit. The footer derives totals from completed rows and displays a
+separate total for every normalized unit. It never implicitly converts or combines `mm²`, `cm²`,
+and `px²`; unknown units are grouped only when their normalized raw labels match.
 
 ## Checks
 

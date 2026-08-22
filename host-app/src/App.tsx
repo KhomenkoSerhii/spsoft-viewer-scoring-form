@@ -16,6 +16,7 @@ import {
   type MeasurementRowStatus,
   type ScoringState,
 } from './scoring/state';
+import { calculateAreaTotals } from './scoring/totals';
 
 const DEFAULT_VIEWER_STUDY_UID = '1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5';
 const ELLIPSE_TOOL: SupportedToolName = 'EllipticalROI';
@@ -186,6 +187,7 @@ function ScoringPanel({
       ? 'Viewer підключено'
       : 'Ellipse недоступний';
   const busy = hasActiveDrawing(state);
+  const totals = calculateAreaTotals(state.rows);
 
   return (
     <aside
@@ -240,9 +242,26 @@ function ScoringPanel({
         )}
       </div>
 
-      <footer className="scoring-total">
+      <footer
+        className="scoring-total"
+        aria-live="polite"
+      >
         <span>Разом</span>
-        <output>—</output>
+        <div className="scoring-total__values">
+          {totals.length ? (
+            totals.map(total => (
+              <output
+                key={total.key}
+                aria-label={`Разом ${total.displayUnit}`}
+                data-total-key={total.key}
+              >
+                {AREA_NUMBER_FORMATTER.format(total.value)} {total.displayUnit}
+              </output>
+            ))
+          ) : (
+            <output>—</output>
+          )}
+        </div>
       </footer>
     </aside>
   );

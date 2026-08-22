@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type FrameLocator, type Locator } from '@playwright/test';
 
 interface CapturedBridgeMessage {
   origin: string;
@@ -24,6 +24,57 @@ interface CornerstoneWindow extends Window {
       getAllToolGroups(): Array<{ getActivePrimaryMouseButtonTool(): string | undefined }>;
     };
   };
+}
+
+async function activateAndDrawEllipse(
+  measurementRow: Locator,
+  viewerFrame: FrameLocator,
+  activeViewport: Locator,
+  start: { x: number; y: number },
+  end: { x: number; y: number }
+) {
+  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
+  await expect(measurementRow.getByText('Малювання…')).toBeVisible();
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  const viewportBox = await activeViewport.boundingBox();
+
+  if (!viewportBox) {
+    throw new Error('Active OHIF viewport has no bounding box.');
+  }
+
+  await activeViewport.click({
+    position: { x: viewportBox.width * start.x, y: viewportBox.height * start.y },
+  });
+  await activeViewport.click({
+    position: { x: viewportBox.width * end.x, y: viewportBox.height * end.y },
+  });
+  await expect(measurementRow.getByText('Готово')).toBeVisible({ timeout: 30_000 });
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'Pan'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
 }
 
 test('host correlates ellipses, ignores unarmed tools, and resets after reload', async ({
@@ -175,37 +226,16 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     )
     .toBe(true);
 
-  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
-  await expect(measurementRow.getByText('Малювання…')).toBeVisible();
-
-  await expect
-    .poll(
-      () =>
-        viewerFrame.locator('body').evaluate(() => {
-          const cornerstoneWindow = window as CornerstoneWindow;
-          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
-            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
-          );
-        }),
-      { timeout: 30_000 }
-    )
-    .toBe(true);
-
   const activeViewport = viewerFrame
     .locator('[data-cy="viewport-pane"][data-is-active="true"]')
     .first();
-  const viewportBox = await activeViewport.boundingBox();
-
-  if (!viewportBox) {
-    throw new Error('Active OHIF viewport has no bounding box.');
-  }
-
-  await activeViewport.click({
-    position: { x: viewportBox.width * 0.42, y: viewportBox.height * 0.4 },
-  });
-  await activeViewport.click({
-    position: { x: viewportBox.width * 0.56, y: viewportBox.height * 0.52 },
-  });
+  await activateAndDrawEllipse(
+    measurementRow,
+    viewerFrame,
+    activeViewport,
+    { x: 0.42, y: 0.4 },
+    { x: 0.56, y: 0.52 }
+  );
 
   await expect
     .poll(
@@ -241,7 +271,50 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await expect(measurementRow.getByText('Готово')).toBeVisible();
   await expect(measurementRow.locator('output')).toContainText('mm²');
   await expect(measurementRow.getByRole('button')).toHaveCount(0);
-  await expect(page.locator('.scoring-total output')).toHaveText('—');
+
+  await page.getByRole('button', { name: 'Додати вимірювання' }).click();
+  const secondMeasurementRow = page.getByRole('article').nth(1);
+  await activateAndDrawEllipse(
+    secondMeasurementRow,
+    viewerFrame,
+    activeViewport,
+    { x: 0.58, y: 0.28 },
+    { x: 0.68, y: 0.38 }
+  );
+
+  await page.getByRole('button', { name: 'Додати вимірювання' }).click();
+  const thirdMeasurementRow = page.getByRole('article').nth(2);
+  await activateAndDrawEllipse(
+    thirdMeasurementRow,
+    viewerFrame,
+    activeViewport,
+    { x: 0.3, y: 0.56 },
+    { x: 0.4, y: 0.66 }
+  );
+
+  const expectedTotal = await page.evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+    const values = bridgeWindow.__spsoftBridgeMessages.flatMap(message => {
+      if (
+        message.origin !== 'http://localhost:3000' ||
+        message.data?.type !== 'MEASUREMENT_ADDED'
+      ) {
+        return [];
+      }
+
+      const measurement = message.data.payload?.measurement as { value?: unknown } | undefined;
+      return typeof measurement?.value === 'number' ? [measurement.value] : [];
+    });
+    const total = values.reduce((sum, value) => sum + value, 0);
+
+    return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(total)} mm²`;
+  });
+
+  await expect(page.getByRole('article')).toHaveCount(3);
+  await expect(page.getByRole('article').getByText('Готово')).toHaveCount(3);
+  await expect(page.locator('.scoring-total output')).toHaveText(expectedTotal);
 
   await expect
     .poll(
@@ -265,6 +338,14 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
         message.origin === 'http://localhost:3000' && message.data?.type === 'MEASUREMENT_ADDED'
     ).length;
   });
+
+  expect(correlatedMessageCount).toBe(3);
+
+  const viewportBox = await activeViewport.boundingBox();
+
+  if (!viewportBox) {
+    throw new Error('Active OHIF viewport has no bounding box.');
+  }
 
   await viewerFrame.locator('[data-cy="MeasurementTools-split-button-secondary"] button').click();
   const ellipseToolbarButton = viewerFrame.getByRole('menuitem', { name: 'Ellipse' });
@@ -304,7 +385,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
         }),
       { timeout: 30_000 }
     )
-    .toBe(2);
+    .toBe(4);
 
   await expect
     .poll(() =>
@@ -337,6 +418,8 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await viewerFrame.locator('body').evaluate(() => window.location.reload());
   await expect(measurementRow.getByText('Очікує')).toBeVisible();
   await expect(measurementRow.locator('output')).toHaveText('—');
+  await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(3);
+  await expect(page.locator('.scoring-total output')).toHaveText('—');
 
   await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
     timeout: 180_000,
