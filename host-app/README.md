@@ -14,7 +14,16 @@ breaking the upstream OHIF dependency policy.
 
 ## Local development
 
-Run OHIF Viewer from the repository root:
+Run both applications from the repository root:
+
+```bash
+yarn dev:spsoft
+```
+
+Open <http://localhost:5173>. The host app embeds the Viewer running on
+<http://localhost:3000>. Press `Ctrl+C` to stop both applications.
+
+Alternatively, run each application in a separate terminal. Start OHIF Viewer with:
 
 ```bash
 yarn dev:viewer
@@ -27,8 +36,6 @@ In a second terminal, run the host app:
 ```bash
 yarn dev:host
 ```
-
-Open <http://localhost:5173>. The host app embeds a concrete public study from the local Viewer.
 
 ## Configuration
 
