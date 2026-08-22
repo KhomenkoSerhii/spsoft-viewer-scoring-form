@@ -40,6 +40,7 @@
     "dev:fast": "cd platform/app && yarn run dev:fast",
     "dev:viewer": "yarn workspace @ohif/app dev",
     "dev:host": "yarn workspace @spsoft/host-app dev",
+    "dev:spsoft": "node .scripts/dev-spsoft.mjs",
     "build:host": "yarn workspace @spsoft/host-app build",
     "typecheck:host": "yarn workspace @spsoft/host-app typecheck",
     "test:host": "yarn workspace @spsoft/host-app test",
