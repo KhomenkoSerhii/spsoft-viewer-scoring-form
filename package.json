@@ -9,6 +9,7 @@
       "platform/ui",
       "platform/core",
       "platform/i18n",
+      "host-app",
       "extensions/*",
       "modes/*",
       "addOns/externals/*"
@@ -36,6 +37,10 @@
     "build:package-all": "lerna run build:package --stream --concurrency 4",
     "build:package-all-1": "lerna run build:package-1 --stream --concurrency 4",
     "dev:fast": "cd platform/app && yarn run dev:fast",
+    "dev:viewer": "yarn workspace @ohif/app dev",
+    "dev:host": "yarn workspace @spsoft/host-app dev",
+    "build:host": "yarn workspace @spsoft/host-app build",
+    "typecheck:host": "yarn workspace @spsoft/host-app typecheck",
     "show:config": "echo Config is $APP_CONFIG on $PUBLIC_URL",
     "dev": "lerna run dev:viewer --stream",
     "dev:no:cache": "lerna run dev:no:cache --stream",

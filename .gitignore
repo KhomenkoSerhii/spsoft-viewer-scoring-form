@@ -27,6 +27,8 @@ package-lock.json
 yarn-error.log
 .DS_Store
 .env
+.env.local
+.env.*.local
 *.code-workspace
 .directory
 
