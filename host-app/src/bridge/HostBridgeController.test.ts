@@ -34,8 +34,13 @@ class FakeHostWindow implements HostMessageWindow {
 
 class FakeViewerWindow implements ViewerMessageWindow {
   readonly postedMessages: Array<{ message: unknown; targetOrigin: string }> = [];
+  throwOnPostMessage = false;
 
   postMessage(message: unknown, targetOrigin: string): void {
+    if (this.throwOnPostMessage) {
+      throw new Error('The Viewer iframe is unavailable.');
+    }
+
     this.postedMessages.push({ message, targetOrigin });
   }
 }
@@ -224,6 +229,28 @@ describe('HostBridgeController', () => {
 
     expect(callbacks.onActivationRejected).toHaveBeenCalledWith(activation, 'unsupported');
     expect(viewerWindow.postedMessages).toHaveLength(0);
+  });
+
+  it('reports an immediate activation error when the Viewer command cannot be posted', () => {
+    const { activation, announceReady, controller, viewerWindow } = createHarness();
+    controller.install();
+    announceReady();
+    viewerWindow.throwOnPostMessage = true;
+
+    expect(controller.activate(activation)).toBe('error');
+    expect(viewerWindow.postedMessages).toHaveLength(0);
+  });
+
+  it('rejects a queued activation when the Viewer disappears before handshake flush', () => {
+    const { activation, announceReady, callbacks, controller, viewerWindow } = createHarness();
+    controller.install();
+
+    expect(controller.activate(activation)).toBe('queued');
+    viewerWindow.throwOnPostMessage = true;
+    announceReady();
+
+    expect(callbacks.onActivationRejected).toHaveBeenCalledWith(activation, 'error');
+    expect(callbacks.onActivationSent).not.toHaveBeenCalled();
   });
 
   it('resets an active row when Viewer announces a new session', () => {

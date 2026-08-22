@@ -141,6 +141,7 @@ function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean }
   };
   const ids = ['viewer-session-1', 'ready-message-1', 'viewer-session-2', 'ready-message-2'];
   const onHostMessage = jest.fn();
+  const onCommandError = jest.fn();
   const commandsManager = { runCommand: jest.fn() };
   const controller = new ViewerBridgeController({
     bridgeWindow,
@@ -148,6 +149,7 @@ function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean }
     hostOrigin: 'http://localhost:5173',
     services,
     createId: () => ids.shift() ?? 'fallback-id',
+    onCommandError,
     onHostMessage,
   });
 
@@ -168,6 +170,7 @@ function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean }
     controller,
     makeReady,
     measurementService,
+    onCommandError,
     onHostMessage,
     toolGroupService,
     viewportGridService,
@@ -578,6 +581,46 @@ describe('ViewerBridgeController tool commands', () => {
     expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
       toolName: 'Pan',
     });
+  });
+
+  it('reports command failures without arming a measurement operation', () => {
+    const {
+      bridgeWindow,
+      commandsManager,
+      controller,
+      makeReady,
+      measurementService,
+      onCommandError,
+    } = createHarness();
+    controller.enterMode();
+    makeReady();
+    commandsManager.runCommand.mockImplementationOnce(() => {
+      throw new Error('EllipticalROI activation failed.');
+    });
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+
+    expect(onCommandError).toHaveBeenCalledWith(expect.any(Error));
+    expect(bridgeWindow.postedMessages).toHaveLength(1);
   });
 });
 

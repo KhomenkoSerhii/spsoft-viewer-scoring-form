@@ -155,6 +155,23 @@ describe('scoringReducer', () => {
     });
   });
 
+  it('exposes bridge failures as retryable row errors', () => {
+    const withRow = scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' });
+
+    const rejected = scoringReducer(withRow, {
+      type: 'activationRequested',
+      rowId: 'row-1',
+      activationId: 'activation-1',
+      outcome: 'error',
+    });
+
+    expect(rejected.rows[0]).toEqual({
+      id: 'row-1',
+      status: 'error',
+      error: 'bridge-error',
+    });
+  });
+
   it('clears completed bindings while the viewer reloads', () => {
     const readyState = {
       connection: {
