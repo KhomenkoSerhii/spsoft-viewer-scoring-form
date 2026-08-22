@@ -33,5 +33,11 @@ to Pan. If OHIF has not populated `cachedStats` yet, the bridge remembers that a
 finishes it from the matching `MEASUREMENT_UPDATED` event. Unrelated, malformed, unarmed and
 duplicate measurement events are ignored.
 
-Live synchronization of later edits remains intentionally deferred to the optional follow-up; the
-current update subscription is only a completion fallback for the one armed annotation.
+After creation, later `MEASUREMENT_UPDATED` events keep the correlated form row synchronized while
+the user edits the ellipse. A correlated `REMOVE_MEASUREMENT` command removes the OHIF measurement;
+the resulting service event is returned as `MEASUREMENT_REMOVED`. Deletion initiated directly in
+OHIF uses the same event path. Events for annotations that were not created through the bridge are
+ignored.
+
+Mode exit restores Pan, removes the window listener, unsubscribes from OHIF services, cancels
+readiness retries, and clears session bindings.

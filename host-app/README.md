@@ -43,10 +43,11 @@ yarn dev:host
 ## Configuration
 
 The default iframe URL points to the public measurement demo study documented by OHIF. To use
-another Viewer origin or study, copy `.env.example` to `.env.local` and change
+another Viewer origin or study, run
+`cp host-app/.env.example host-app/.env.local` from the repository root and change
 `VITE_VIEWER_ORIGIN` or `VITE_VIEWER_STUDY_UID`. Keep `VITE_VIEWER_ORIGIN` limited to the origin
-itself (for example, `http://localhost:3000`); the host app builds the Viewer URL from it.
-An invalid or unsafe value is reported in the browser console and falls back to the local Viewer.
+itself (for example, `http://localhost:3000`); the host app builds the Viewer URL from it. An
+invalid or unsafe value is reported in the browser console and falls back to the local Viewer.
 
 ## Viewer bridge
 
@@ -61,6 +62,10 @@ Completing the ellipse stores the correlated annotation ID and displays its norm
 matching row. Accepted message and annotation IDs are retained for the current Viewer session so a
 duplicate cannot complete another row. Reloading the iframe invalidates completed bindings and
 returns those rows to the waiting state because the new Viewer no longer contains their annotations.
+
+Editing a correlated ellipse in OHIF updates its form row and totals. **Delete** sends a correlated
+removal command and waits for Viewer confirmation before removing the row. If the user deletes the
+annotation directly in OHIF, the existing row is cleared and returns to the waiting state.
 
 Values are formatted for the Ukrainian locale only in the view; the reducer keeps the original
 numeric value and exact OHIF unit. The footer derives totals from completed rows and displays a
@@ -85,3 +90,5 @@ yarn build:host
 
 For a faster package-level check, run `yarn test:protocol`, `yarn test:viewer-bridge`, or
 `yarn test:host` individually.
+
+The full message contract and design decisions are in [`ARCHITECTURE.md`](../ARCHITECTURE.md).
