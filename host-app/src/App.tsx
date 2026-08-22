@@ -7,6 +7,7 @@ import {
   type ActivationRequest,
   type ActivationResult,
 } from './bridge/HostBridgeController';
+import { resolveViewerOrigin } from './config/viewerConfiguration';
 import {
   hasActiveDrawing,
   initialScoringState,
@@ -16,15 +17,20 @@ import {
   type ScoringState,
 } from './scoring/state';
 
-const DEFAULT_VIEWER_ORIGIN = 'http://localhost:3000';
 const DEFAULT_VIEWER_STUDY_UID = '1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5';
 const ELLIPSE_TOOL: SupportedToolName = 'EllipticalROI';
 
-const viewerOrigin = new URL(import.meta.env.VITE_VIEWER_ORIGIN || DEFAULT_VIEWER_ORIGIN).origin;
+const viewerConfiguration = resolveViewerOrigin(import.meta.env.VITE_VIEWER_ORIGIN);
+const viewerOrigin = viewerConfiguration.origin;
+const viewerOriginLabel = new URL(viewerOrigin).host;
 const viewerStudyUid = import.meta.env.VITE_VIEWER_STUDY_UID || DEFAULT_VIEWER_STUDY_UID;
 const viewerUrl = new URL('/viewer', viewerOrigin);
 
 viewerUrl.searchParams.set('StudyInstanceUIDs', viewerStudyUid);
+
+if (viewerConfiguration.warning) {
+  console.warn(viewerConfiguration.warning);
+}
 
 const statusCopy: Record<MeasurementRowStatus, { label: string; description: string }> = {
   waiting: { label: 'Очікує', description: 'Готове до активації' },
@@ -48,7 +54,7 @@ function ViewerFrame({ bridgeInstalled, iframeRef }: ViewerFrameProps) {
       <div className="viewer-panel__label">
         <span className="viewer-panel__pulse" />
         <span>OHIF Viewer</span>
-        <span className="viewer-panel__port">:3000</span>
+        <span className="viewer-panel__origin">{viewerOriginLabel}</span>
       </div>
 
       {bridgeInstalled ? (

@@ -8,6 +8,19 @@ interface CapturedBridgeMessage {
   };
 }
 
+interface CornerstoneWindow extends Window {
+  cornerstone?: {
+    getRenderingEngines(): Array<{
+      getViewports(): Array<{ getCurrentImageId(): string | undefined }>;
+    }>;
+  };
+  cornerstoneTools?: {
+    ToolGroupManager: {
+      getAllToolGroups(): Array<{ getActivePrimaryMouseButtonTool(): string | undefined }>;
+    };
+  };
+}
+
 test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
@@ -30,6 +43,23 @@ test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
   await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
     timeout: 180_000,
   });
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstone
+            ?.getRenderingEngines()
+            .flatMap(engine => engine.getViewports())
+            .some(viewport => Boolean(viewport.getCurrentImageId()));
+        }),
+      { timeout: 180_000 }
+    )
+    .toBe(true);
+
+  await expect(viewerFrame.locator('.shepherd-element')).toHaveCount(0);
+  await expect(viewerFrame.locator('[data-cy="confirm-and-hide-button"]')).toHaveCount(0);
 
   await expect
     .poll(
@@ -86,6 +116,19 @@ test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
       },
     });
 
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
   await measurementRow.getByRole('button', { name: 'Скасувати' }).click();
   await expect(measurementRow.getByText('Очікує')).toBeVisible();
 
@@ -110,6 +153,19 @@ test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
         payload: { reason: 'user-cancelled' },
       },
     });
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'Pan'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
 
   await expect(viewerFrame.getByText('Uncaught runtime errors:')).toHaveCount(0);
   expect(runtimeErrors).toEqual([]);

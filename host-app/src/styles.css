@@ -106,7 +106,7 @@ output {
   box-shadow: 0 0 0 3px rgb(98 205 185 / 13%);
 }
 
-.viewer-panel__port {
+.viewer-panel__origin {
   color: #91a2a5;
   font-variant-numeric: tabular-nums;
 }

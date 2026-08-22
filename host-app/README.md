@@ -36,6 +36,7 @@ The default iframe URL points to the public measurement demo study documented by
 another Viewer origin or study, copy `.env.example` to `.env.local` and change
 `VITE_VIEWER_ORIGIN` or `VITE_VIEWER_STUDY_UID`. Keep `VITE_VIEWER_ORIGIN` limited to the origin
 itself (for example, `http://localhost:3000`); the host app builds the Viewer URL from it.
+An invalid or unsafe value is reported in the browser console and falls back to the local Viewer.
 
 ## Viewer bridge
 

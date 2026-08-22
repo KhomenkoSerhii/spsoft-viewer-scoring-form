@@ -8,8 +8,14 @@ window.config = {
   spsoftViewerBridge: {
     hostOrigin: 'http://localhost:5173',
   },
+  measurementTrackingMode: 'simplified',
+  investigationalUseDialog: {
+    option: 'never',
+  },
   modes: [],
-  customizationService: {},
+  customizationService: {
+    'ohif.tours': [],
+  },
   showStudyList: true,
   // some windows systems have issues with more than 3 web workers
   maxNumberOfWebWorkers: 3,
