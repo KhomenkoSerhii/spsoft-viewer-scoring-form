@@ -1,0 +1,20 @@
+{
+  "name": "@spsoft/viewer-protocol",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Typed postMessage contract shared by the SPSoft host app and OHIF bridge",
+  "main": "src/index.ts",
+  "module": "src/index.ts",
+  "types": "src/index.ts",
+  "sideEffects": false,
+  "scripts": {
+    "test": "jest --config jest.config.js --runInBand",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/jest": "29.5.14",
+    "babel-jest": "29.7.0",
+    "jest": "29.7.0",
+    "typescript": "5.8.3"
+  }
+}
