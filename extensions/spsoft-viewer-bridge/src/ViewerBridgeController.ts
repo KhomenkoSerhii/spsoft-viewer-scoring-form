@@ -15,6 +15,7 @@ import type {
   ViewerBridgeServices,
   ViewportGridState,
 } from './types';
+import { extractEllipticalRoiAnnotationId, extractEllipticalRoiMeasurement } from './measurement';
 
 const ELLIPTICAL_ROI: SupportedToolName = 'EllipticalROI';
 const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
@@ -31,6 +32,7 @@ export interface ViewerBridgeControllerOptions {
 
 interface ArmedActivation {
   activationId: string;
+  pendingAnnotationId?: string;
   rowId: string;
   toolName: SupportedToolName;
 }
@@ -69,7 +71,7 @@ export class ViewerBridgeController {
 
     this.bridgeWindow.addEventListener('message', this.handleMessage);
 
-    const { viewportGridService, toolGroupService } = this.services;
+    const { measurementService, viewportGridService, toolGroupService } = this.services;
     const viewportEvents = [
       viewportGridService.EVENTS.VIEWPORTS_READY,
       viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
@@ -86,6 +88,21 @@ export class ViewerBridgeController {
 
     for (const eventName of toolGroupEvents) {
       this.subscriptions.push(toolGroupService.subscribe(eventName, this.tryAnnounceReady));
+    }
+
+    const measurementAddedEvent = measurementService.EVENTS.MEASUREMENT_ADDED;
+    const measurementUpdatedEvent = measurementService.EVENTS.MEASUREMENT_UPDATED;
+
+    if (typeof measurementAddedEvent === 'string') {
+      this.subscriptions.push(
+        measurementService.subscribe(measurementAddedEvent, this.handleMeasurementAdded)
+      );
+    }
+
+    if (typeof measurementUpdatedEvent === 'string') {
+      this.subscriptions.push(
+        measurementService.subscribe(measurementUpdatedEvent, this.handleMeasurementUpdated)
+      );
     }
 
     this.installed = true;
@@ -153,6 +170,64 @@ export class ViewerBridgeController {
     }
     this.onHostMessage?.(message);
   };
+
+  private readonly handleMeasurementAdded = (event: unknown): void => {
+    if (!this.modeActive || !this.viewerInstanceId || !this.armedActivation) {
+      return;
+    }
+
+    const annotationId = extractEllipticalRoiAnnotationId(event);
+
+    if (!annotationId) {
+      return;
+    }
+
+    if (!this.armedActivation.pendingAnnotationId) {
+      this.armedActivation.pendingAnnotationId = annotationId;
+    }
+
+    if (this.armedActivation.pendingAnnotationId !== annotationId) {
+      return;
+    }
+
+    this.completeArmedMeasurement(event);
+  };
+
+  private readonly handleMeasurementUpdated = (event: unknown): void => {
+    if (!this.modeActive || !this.viewerInstanceId || !this.armedActivation?.pendingAnnotationId) {
+      return;
+    }
+
+    if (extractEllipticalRoiAnnotationId(event) !== this.armedActivation.pendingAnnotationId) {
+      return;
+    }
+
+    this.completeArmedMeasurement(event);
+  };
+
+  private completeArmedMeasurement(event: unknown): void {
+    const extractedMeasurement = extractEllipticalRoiMeasurement(event);
+
+    if (!extractedMeasurement || !this.viewerInstanceId || !this.armedActivation) {
+      return;
+    }
+
+    const { activationId, rowId } = this.armedActivation;
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
+      {
+        viewerInstanceId: this.viewerInstanceId,
+        rowId,
+        activationId,
+        annotationId: extractedMeasurement.annotationId,
+        measurement: extractedMeasurement.measurement,
+      },
+      this.createId()
+    );
+
+    this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
+    this.deactivateArmedTool();
+  }
 
   private executeHostCommand(message: Parameters<HostMessageHandler>[0]): void {
     if (message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL) {

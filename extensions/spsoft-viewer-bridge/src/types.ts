@@ -6,7 +6,7 @@ export interface BridgeSubscription {
 
 export interface BridgeEventService {
   readonly EVENTS: Record<string, string>;
-  subscribe(eventName: string, callback: () => void): BridgeSubscription;
+  subscribe(eventName: string, callback: (event: unknown) => void): BridgeSubscription;
 }
 
 export interface ViewportGridState {
@@ -26,7 +26,10 @@ export interface ToolGroupService extends BridgeEventService {
   getToolGroup(): ToolGroup | undefined;
 }
 
+export interface MeasurementService extends BridgeEventService {}
+
 export interface ViewerBridgeServices {
+  measurementService: MeasurementService;
   viewportGridService: ViewportGridService;
   toolGroupService: ToolGroupService;
 }

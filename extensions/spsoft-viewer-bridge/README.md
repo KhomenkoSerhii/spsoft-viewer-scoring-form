@@ -27,5 +27,11 @@ The bridge implements the secure boundary, `VIEWER_READY` handshake, and correla
 `ACTIVATE_TOOL`/`DEACTIVATE_TOOL` commands for `EllipticalROI`. A valid activation arms the OHIF
 tool through `commandsManager`; cancellation, replacement and mode cleanup restore Pan.
 
-Measurement-created and measurement-updated events are intentionally added in the following
-focused PR.
+The first valid `MEASUREMENT_ADDED` event for the armed ellipse is normalized to the shared area
+contract, correlated with its `rowId` and `activationId`, sent to the host, and followed by a return
+to Pan. If OHIF has not populated `cachedStats` yet, the bridge remembers that annotation and
+finishes it from the matching `MEASUREMENT_UPDATED` event. Unrelated, malformed, unarmed and
+duplicate measurement events are ignored.
+
+Live synchronization of later edits remains intentionally deferred to the optional follow-up; the
+current update subscription is only a completion fallback for the one armed annotation.

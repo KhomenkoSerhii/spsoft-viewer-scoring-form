@@ -1,11 +1,18 @@
-import type { SupportedToolName, ViewerReadyPayload } from '@spsoft/viewer-protocol';
+import type {
+  AreaMeasurement,
+  MeasurementAddedPayload,
+  SupportedToolName,
+  ViewerReadyPayload,
+} from '@spsoft/viewer-protocol';
 
 export type MeasurementRowStatus = 'waiting' | 'queued' | 'drawing' | 'ready' | 'error';
 
 export interface MeasurementRow {
   activationId?: string;
+  annotationId?: string;
   error?: 'unsupported' | 'bridge-error';
   id: string;
+  measurement?: AreaMeasurement;
   status: MeasurementRowStatus;
 }
 
@@ -37,6 +44,8 @@ export type ScoringAction =
       rowId: string;
     }
   | { type: 'activationReset'; activationId: string; rowId: string }
+  | { type: 'measurementReceived'; payload: MeasurementAddedPayload }
+  | { type: 'viewerLoading' }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
 export const initialScoringState: ScoringState = {
@@ -56,7 +65,17 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         rows: [...state.rows, { id: action.rowId, status: 'waiting' }],
       };
 
-    case 'viewerReady':
+    case 'viewerLoading':
+      return {
+        connection: { status: 'connecting' },
+        rows: resetCompletedRows(state.rows),
+      };
+
+    case 'viewerReady': {
+      const changedViewerSession =
+        state.connection.status === 'ready' &&
+        state.connection.viewerInstanceId !== action.payload.viewerInstanceId;
+
       return {
         ...state,
         connection: {
@@ -64,7 +83,9 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           viewerInstanceId: action.payload.viewerInstanceId,
           supportedTools: action.payload.supportedTools,
         },
+        rows: changedViewerSession ? resetCompletedRows(state.rows) : state.rows,
       };
+    }
 
     case 'activationRequested': {
       if (hasActiveDrawing(state)) {
@@ -102,6 +123,21 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         error: action.reason === 'unsupported' ? 'unsupported' : 'bridge-error',
       }));
 
+    case 'measurementReceived':
+      return updateMatchingActivation(
+        state,
+        {
+          rowId: action.payload.rowId,
+          activationId: action.payload.activationId,
+        },
+        row => ({
+          id: row.id,
+          status: 'ready',
+          annotationId: action.payload.annotationId,
+          measurement: action.payload.measurement,
+        })
+      );
+
     case 'activationCancelled':
     case 'activationReset':
       return updateMatchingActivation(state, action, row => ({
@@ -109,6 +145,20 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         status: 'waiting',
       }));
   }
+}
+
+function resetCompletedRows(rows: MeasurementRow[]): MeasurementRow[] {
+  let changed = false;
+  const resetRows = rows.map(row => {
+    if (row.status !== 'ready') {
+      return row;
+    }
+
+    changed = true;
+    return { id: row.id, status: 'waiting' } satisfies MeasurementRow;
+  });
+
+  return changed ? resetRows : rows;
 }
 
 function updateMatchingActivation(

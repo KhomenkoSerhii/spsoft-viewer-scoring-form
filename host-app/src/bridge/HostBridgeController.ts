@@ -3,6 +3,7 @@ import {
   createBridgeMessage,
   isViewerToHostMessage,
   parseBridgeMessage,
+  type MeasurementAddedPayload,
   type SupportedToolName,
   type ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
@@ -28,6 +29,8 @@ export interface HostBridgeCallbacks {
   onActivationRejected(request: ActivationRequest, reason: 'unsupported' | 'error'): void;
   onActivationReset(request: ActivationRequest): void;
   onActivationSent(request: ActivationRequest): void;
+  onMeasurementAdded(payload: MeasurementAddedPayload): void;
+  onViewerLoading(): void;
   onViewerReady(payload: ViewerReadyPayload): void;
 }
 
@@ -46,6 +49,8 @@ export class HostBridgeController {
   private readonly hostWindow: HostMessageWindow;
   private readonly viewerOrigin: string;
   private activeRequest: ActivationRequest | null = null;
+  private readonly acceptedAnnotationIds = new Set<string>();
+  private readonly acceptedMessageIds = new Set<string>();
   private installed = false;
   private pendingRequest: ActivationRequest | null = null;
   private viewerSession: ViewerReadyPayload | null = null;
@@ -103,6 +108,19 @@ export class HostBridgeController {
     this.activeRequest = null;
   }
 
+  notifyViewerLoading(): void {
+    if (this.activeRequest) {
+      const staleRequest = this.activeRequest;
+      this.activeRequest = null;
+      this.callbacks.onActivationReset(staleRequest);
+    }
+
+    this.viewerSession = null;
+    this.acceptedAnnotationIds.clear();
+    this.acceptedMessageIds.clear();
+    this.callbacks.onViewerLoading();
+  }
+
   dispose(): void {
     if (this.activeRequest) {
       this.postDeactivation(this.activeRequest, 'host-unmounted');
@@ -111,6 +129,8 @@ export class HostBridgeController {
     this.activeRequest = null;
     this.pendingRequest = null;
     this.viewerSession = null;
+    this.acceptedAnnotationIds.clear();
+    this.acceptedMessageIds.clear();
 
     if (!this.installed) {
       return;
@@ -129,15 +149,25 @@ export class HostBridgeController {
 
     const message = parseBridgeMessage(event.data);
 
-    if (
-      !message ||
-      !isViewerToHostMessage(message) ||
-      message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY
-    ) {
+    if (!message || !isViewerToHostMessage(message)) {
+      return;
+    }
+
+    if (message.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED) {
+      this.acceptMeasurement(message.messageId, message.payload);
+      return;
+    }
+
+    if (message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY) {
       return;
     }
 
     const previousViewerInstanceId = this.viewerSession?.viewerInstanceId;
+
+    if (previousViewerInstanceId && previousViewerInstanceId !== message.payload.viewerInstanceId) {
+      this.acceptedAnnotationIds.clear();
+      this.acceptedMessageIds.clear();
+    }
 
     if (
       previousViewerInstanceId &&
@@ -153,6 +183,26 @@ export class HostBridgeController {
     this.callbacks.onViewerReady(message.payload);
     this.flushPendingActivation();
   };
+
+  private acceptMeasurement(messageId: string, payload: MeasurementAddedPayload): void {
+    const activeRequest = this.activeRequest;
+
+    if (
+      !activeRequest ||
+      this.acceptedMessageIds.has(messageId) ||
+      this.acceptedAnnotationIds.has(payload.annotationId) ||
+      payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
+      payload.rowId !== activeRequest.rowId ||
+      payload.activationId !== activeRequest.activationId
+    ) {
+      return;
+    }
+
+    this.acceptedMessageIds.add(messageId);
+    this.acceptedAnnotationIds.add(payload.annotationId);
+    this.activeRequest = null;
+    this.callbacks.onMeasurementAdded(payload);
+  }
 
   private flushPendingActivation(): void {
     const request = this.pendingRequest;
