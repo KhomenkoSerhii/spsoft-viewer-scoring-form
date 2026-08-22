@@ -301,11 +301,14 @@ h1 {
 }
 
 .measurement-row__heading {
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  align-items: start;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 9px;
 }
 
 .measurement-row__heading > div {
+  width: 100%;
   min-width: 0;
   gap: 9px;
 }
@@ -319,6 +322,7 @@ h1 {
 }
 
 .measurement-row h2 {
+  min-width: 0;
   margin: 0;
   overflow: hidden;
   color: var(--ink);
@@ -329,10 +333,16 @@ h1 {
 }
 
 .measurement-row__value {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
   color: #798486;
   font-family: Charter, 'Iowan Old Style', 'Times New Roman', serif;
   font-size: 22px;
   font-weight: 600;
+  line-height: 1.1;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .measurement-row__meta {
@@ -499,6 +509,12 @@ h1 {
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.02em;
   text-transform: none;
+}
+
+.scoring-total__values {
+  display: grid;
+  gap: 4px;
+  justify-items: end;
 }
 
 @media (max-width: 840px) {
