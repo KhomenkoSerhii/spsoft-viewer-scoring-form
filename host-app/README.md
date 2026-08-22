@@ -6,7 +6,10 @@ React + TypeScript shell for the Viewer + Scoring Form test task.
 
 - Use the Node.js version from the repository's `.node-version` file.
 - Yarn `1.22.22`.
-- Install dependencies once from the repository root with `yarn install --frozen-lockfile`.
+
+The combined development command checks dependencies before startup. When they are missing, it
+runs `yarn install --frozen-lockfile` automatically; an existing valid installation is left alone.
+To install dependencies explicitly, run the same install command from the repository root.
 
 The host app intentionally uses Vite 3 because OHIF `v3.12.10` pins Rollup 2 at the monorepo
 level. This keeps the host app inside the same reproducible Yarn workspace without overriding or
