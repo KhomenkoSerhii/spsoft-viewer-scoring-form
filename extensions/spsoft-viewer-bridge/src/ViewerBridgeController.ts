@@ -46,6 +46,7 @@ export class ViewerBridgeController {
   private readonly onHostMessage: HostMessageHandler | undefined;
   private readonly onCommandError: ((error: unknown) => void) | undefined;
   private readonly subscriptions: BridgeSubscription[] = [];
+  private readonly rowIdsByAnnotationId = new Map<string, string>();
   private installed = false;
   private modeActive = false;
   private readyAnnounced = false;
@@ -113,6 +114,7 @@ export class ViewerBridgeController {
     this.modeActive = true;
     this.readyAnnounced = false;
     this.viewerInstanceId = this.createId();
+    this.rowIdsByAnnotationId.clear();
     this.cancelReadyRetry();
     this.readyRetryIndex = 0;
     this.tryAnnounceReady();
@@ -123,6 +125,7 @@ export class ViewerBridgeController {
     this.modeActive = false;
     this.readyAnnounced = false;
     this.viewerInstanceId = null;
+    this.rowIdsByAnnotationId.clear();
     this.cancelReadyRetry();
     this.readyRetryIndex = 0;
 
@@ -194,15 +197,42 @@ export class ViewerBridgeController {
   };
 
   private readonly handleMeasurementUpdated = (event: unknown): void => {
-    if (!this.modeActive || !this.viewerInstanceId || !this.armedActivation?.pendingAnnotationId) {
+    if (!this.modeActive || !this.viewerInstanceId) {
       return;
     }
 
-    if (extractEllipticalRoiAnnotationId(event) !== this.armedActivation.pendingAnnotationId) {
+    const annotationId = extractEllipticalRoiAnnotationId(event);
+
+    if (!annotationId) {
       return;
     }
 
-    this.completeArmedMeasurement(event);
+    if (this.armedActivation?.pendingAnnotationId) {
+      if (annotationId === this.armedActivation.pendingAnnotationId) {
+        this.completeArmedMeasurement(event);
+        return;
+      }
+    }
+
+    const rowId = this.rowIdsByAnnotationId.get(annotationId);
+    const extractedMeasurement = extractEllipticalRoiMeasurement(event);
+
+    if (!rowId || !extractedMeasurement) {
+      return;
+    }
+
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED,
+      {
+        viewerInstanceId: this.viewerInstanceId,
+        rowId,
+        annotationId,
+        measurement: extractedMeasurement.measurement,
+      },
+      this.createId()
+    );
+
+    this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
   };
 
   private completeArmedMeasurement(event: unknown): void {
@@ -213,6 +243,7 @@ export class ViewerBridgeController {
     }
 
     const { activationId, rowId } = this.armedActivation;
+    this.rowIdsByAnnotationId.set(extractedMeasurement.annotationId, rowId);
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
       {
@@ -321,7 +352,7 @@ export class ViewerBridgeController {
       {
         viewerInstanceId: this.viewerInstanceId,
         supportedTools,
-        capabilities: { measurementUpdates: false },
+        capabilities: { measurementUpdates: true },
       },
       this.createId()
     );

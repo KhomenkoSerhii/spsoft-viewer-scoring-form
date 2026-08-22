@@ -1,6 +1,7 @@
 import type {
   AreaMeasurement,
   MeasurementAddedPayload,
+  MeasurementUpdatedPayload,
   SupportedToolName,
   ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
@@ -45,6 +46,7 @@ export type ScoringAction =
     }
   | { type: 'activationReset'; activationId: string; rowId: string }
   | { type: 'measurementReceived'; payload: MeasurementAddedPayload }
+  | { type: 'measurementUpdated'; payload: MeasurementUpdatedPayload }
   | { type: 'viewerLoading' }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
@@ -137,6 +139,21 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           measurement: action.payload.measurement,
         })
       );
+
+    case 'measurementUpdated': {
+      if (
+        state.connection.status !== 'ready' ||
+        state.connection.viewerInstanceId !== action.payload.viewerInstanceId
+      ) {
+        return state;
+      }
+
+      return updateRow(state, action.payload.rowId, row =>
+        row.status === 'ready' && row.annotationId === action.payload.annotationId
+          ? { ...row, measurement: action.payload.measurement }
+          : row
+      );
+    }
 
     case 'activationCancelled':
     case 'activationReset':

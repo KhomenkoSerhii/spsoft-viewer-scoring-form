@@ -11,13 +11,19 @@ interface CapturedBridgeMessage {
 interface CornerstoneWindow extends Window {
   cornerstone?: {
     getRenderingEngines(): Array<{
-      getViewports(): Array<{ getCurrentImageId(): string | undefined }>;
+      getViewports(): Array<{
+        getCurrentImageId(): string | undefined;
+        worldToCanvas(point: number[]): [number, number];
+      }>;
     }>;
   };
   cornerstoneTools?: {
     annotation: {
       state: {
-        getAllAnnotations(): Array<{ metadata?: { toolName?: string } }>;
+        getAllAnnotations(): Array<{
+          data?: { handles?: { points?: number[][] } };
+          metadata?: { toolName?: string };
+        }>;
       };
     };
     ToolGroupManager: {
@@ -272,6 +278,74 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await expect(measurementRow.locator('output')).toContainText('mm²');
   await expect(measurementRow.getByRole('button')).toHaveCount(0);
 
+  const valueBeforeDrag = await measurementRow.locator('output').textContent();
+  const updateCountBeforeDrag = await page.evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+    return bridgeWindow.__spsoftBridgeMessages.filter(
+      message =>
+        message.origin === 'http://localhost:3000' && message.data?.type === 'MEASUREMENT_UPDATED'
+    ).length;
+  });
+  const handlePosition = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    const annotation = cornerstoneWindow.cornerstoneTools?.annotation.state
+      .getAllAnnotations()
+      .find(item => item.metadata?.toolName === 'EllipticalROI');
+    const handle = annotation?.data?.handles?.points?.[0];
+    const viewport = cornerstoneWindow.cornerstone
+      ?.getRenderingEngines()
+      .flatMap(engine => engine.getViewports())
+      .find(item => Boolean(item.getCurrentImageId()));
+
+    if (!handle || !viewport) {
+      throw new Error('Could not resolve an ellipse handle in the active viewport.');
+    }
+
+    const [x, y] = viewport.worldToCanvas(handle);
+    return { x, y };
+  });
+  const firstViewportBox = await activeViewport.boundingBox();
+
+  if (!firstViewportBox) {
+    throw new Error('Active OHIF viewport has no bounding box for live update testing.');
+  }
+
+  await viewerFrame.locator('[data-cy="MeasurementTools-split-button-secondary"] button').click();
+  const editEllipseToolbarButton = viewerFrame.getByRole('menuitem', { name: 'Ellipse' });
+  await expect(editEllipseToolbarButton).toBeVisible({ timeout: 10_000 });
+  await editEllipseToolbarButton.click();
+  await page.mouse.move(
+    firstViewportBox.x + handlePosition.x,
+    firstViewportBox.y + handlePosition.y
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    firstViewportBox.x + handlePosition.x + 30,
+    firstViewportBox.y + handlePosition.y + 20,
+    { steps: 10 }
+  );
+  await page.mouse.up();
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          return bridgeWindow.__spsoftBridgeMessages.filter(
+            message =>
+              message.origin === 'http://localhost:3000' &&
+              message.data?.type === 'MEASUREMENT_UPDATED'
+          ).length;
+        }),
+      { timeout: 30_000 }
+    )
+    .toBeGreaterThan(updateCountBeforeDrag);
+  await expect(measurementRow.locator('output')).not.toHaveText(valueBeforeDrag ?? '');
+
   await page.getByRole('button', { name: 'Додати вимірювання' }).click();
   const secondMeasurementRow = page.getByRole('article').nth(1);
   await activateAndDrawEllipse(
@@ -296,18 +370,25 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     const bridgeWindow = window as Window & {
       __spsoftBridgeMessages: CapturedBridgeMessage[];
     };
-    const values = bridgeWindow.__spsoftBridgeMessages.flatMap(message => {
+    const valuesByAnnotationId = new Map<string, number>();
+
+    for (const message of bridgeWindow.__spsoftBridgeMessages) {
       if (
         message.origin !== 'http://localhost:3000' ||
-        message.data?.type !== 'MEASUREMENT_ADDED'
+        (message.data?.type !== 'MEASUREMENT_ADDED' && message.data?.type !== 'MEASUREMENT_UPDATED')
       ) {
-        return [];
+        continue;
       }
 
+      const annotationId = message.data.payload?.annotationId;
       const measurement = message.data.payload?.measurement as { value?: unknown } | undefined;
-      return typeof measurement?.value === 'number' ? [measurement.value] : [];
-    });
-    const total = values.reduce((sum, value) => sum + value, 0);
+
+      if (typeof annotationId === 'string' && typeof measurement?.value === 'number') {
+        valuesByAnnotationId.set(annotationId, measurement.value);
+      }
+    }
+
+    const total = [...valuesByAnnotationId.values()].reduce((sum, value) => sum + value, 0);
 
     return `${new Intl.NumberFormat('uk-UA', { maximumFractionDigits: 2 }).format(total)} mm²`;
   });

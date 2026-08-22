@@ -54,6 +54,7 @@ function createHarness() {
     onActivationReset: jest.fn(),
     onActivationSent: jest.fn(),
     onMeasurementAdded: jest.fn(),
+    onMeasurementUpdated: jest.fn(),
     onViewerLoading: jest.fn(),
     onViewerReady: jest.fn(),
   };
@@ -126,12 +127,45 @@ function createHarness() {
     return payload;
   };
 
+  const dispatchMeasurementUpdate = ({
+    annotationId = 'annotation-1',
+    messageId = 'measurement-update-message',
+    rowId = 'row-1',
+    value = 50.25,
+    viewerInstanceId = 'viewer-1',
+  }: {
+    annotationId?: string;
+    messageId?: string;
+    rowId?: string;
+    value?: number;
+    viewerInstanceId?: string;
+  } = {}) => {
+    const payload = {
+      viewerInstanceId,
+      rowId,
+      annotationId,
+      measurement: {
+        kind: 'area' as const,
+        value,
+        unit: 'mm2' as const,
+        rawUnit: 'mm²',
+      },
+    };
+    hostWindow.dispatch(
+      createBridgeMessage(BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED, payload, messageId),
+      'http://localhost:3000',
+      viewerWindow
+    );
+    return payload;
+  };
+
   return {
     activation,
     announceReady,
     callbacks,
     controller,
     dispatchMeasurement,
+    dispatchMeasurementUpdate,
     hostWindow,
     viewerWindow,
   };
@@ -343,6 +377,30 @@ describe('HostBridgeController', () => {
     });
 
     expect(callbacks.onMeasurementAdded).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts live updates only for the current correlated annotation and session', () => {
+    const {
+      activation,
+      announceReady,
+      callbacks,
+      controller,
+      dispatchMeasurement,
+      dispatchMeasurementUpdate,
+    } = createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+    dispatchMeasurement();
+
+    dispatchMeasurementUpdate({ viewerInstanceId: 'stale-viewer' });
+    dispatchMeasurementUpdate({ rowId: 'other-row' });
+    dispatchMeasurementUpdate({ annotationId: 'other-annotation' });
+    const payload = dispatchMeasurementUpdate();
+    dispatchMeasurementUpdate();
+
+    expect(callbacks.onMeasurementUpdated).toHaveBeenCalledTimes(1);
+    expect(callbacks.onMeasurementUpdated).toHaveBeenCalledWith(payload);
   });
 
   it('deactivates an armed tool and removes its listener during disposal', () => {
