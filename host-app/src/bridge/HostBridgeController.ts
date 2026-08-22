@@ -3,6 +3,7 @@ import {
   createBridgeMessage,
   isViewerToHostMessage,
   parseBridgeMessage,
+  type MeasurementAddedPayload,
   type SupportedToolName,
   type ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
@@ -28,6 +29,7 @@ export interface HostBridgeCallbacks {
   onActivationRejected(request: ActivationRequest, reason: 'unsupported' | 'error'): void;
   onActivationReset(request: ActivationRequest): void;
   onActivationSent(request: ActivationRequest): void;
+  onMeasurementAdded(payload: MeasurementAddedPayload): void;
   onViewerReady(payload: ViewerReadyPayload): void;
 }
 
@@ -129,11 +131,16 @@ export class HostBridgeController {
 
     const message = parseBridgeMessage(event.data);
 
-    if (
-      !message ||
-      !isViewerToHostMessage(message) ||
-      message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY
-    ) {
+    if (!message || !isViewerToHostMessage(message)) {
+      return;
+    }
+
+    if (message.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED) {
+      this.acceptMeasurement(message.payload);
+      return;
+    }
+
+    if (message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY) {
       return;
     }
 
@@ -153,6 +160,22 @@ export class HostBridgeController {
     this.callbacks.onViewerReady(message.payload);
     this.flushPendingActivation();
   };
+
+  private acceptMeasurement(payload: MeasurementAddedPayload): void {
+    const activeRequest = this.activeRequest;
+
+    if (
+      !activeRequest ||
+      payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
+      payload.rowId !== activeRequest.rowId ||
+      payload.activationId !== activeRequest.activationId
+    ) {
+      return;
+    }
+
+    this.activeRequest = null;
+    this.callbacks.onMeasurementAdded(payload);
+  }
 
   private flushPendingActivation(): void {
     const request = this.pendingRequest;

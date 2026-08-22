@@ -86,6 +86,46 @@ describe('scoringReducer', () => {
     expect(cancelled.rows[0]).toEqual({ id: 'row-1', status: 'waiting' });
   });
 
+  it('stores a correlated area measurement and completes only the matching row', () => {
+    const drawing = scoringReducer(
+      scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' }),
+      {
+        type: 'activationRequested',
+        rowId: 'row-1',
+        activationId: 'activation-1',
+        outcome: 'sent',
+      }
+    );
+    const staleResult = scoringReducer(drawing, {
+      type: 'measurementReceived',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        activationId: 'stale-activation',
+        annotationId: 'stale-annotation',
+        measurement: { kind: 'area', value: 1, unit: 'mm2', rawUnit: 'mm²' },
+      },
+    });
+    const completed = scoringReducer(staleResult, {
+      type: 'measurementReceived',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        activationId: 'activation-1',
+        annotationId: 'annotation-1',
+        measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+      },
+    });
+
+    expect(staleResult).toBe(drawing);
+    expect(completed.rows[0]).toEqual({
+      id: 'row-1',
+      status: 'ready',
+      annotationId: 'annotation-1',
+      measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+    });
+  });
+
   it('stores viewer capabilities and exposes unsupported-tool errors', () => {
     const connected = scoringReducer(initialScoringState, {
       type: 'viewerReady',

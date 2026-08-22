@@ -47,7 +47,8 @@ Add a measurement row and choose **Activate Ellipse** to arm `EllipticalROI` in 
 can be queued or drawing at a time. Activation requested before the Viewer is ready is queued and
 sent after the handshake; **Cancel** drops a queued request or restores the Viewer to Pan.
 
-Measurement values and totals are intentionally added in the following focused PR.
+Completing the ellipse stores the correlated annotation ID and displays its normalized area in the
+matching row. Totals are intentionally added in the following focused PR.
 
 ## Checks
 

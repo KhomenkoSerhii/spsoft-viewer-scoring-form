@@ -19,6 +19,9 @@ import {
 
 const DEFAULT_VIEWER_STUDY_UID = '1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5';
 const ELLIPSE_TOOL: SupportedToolName = 'EllipticalROI';
+const AREA_NUMBER_FORMATTER = new Intl.NumberFormat('uk-UA', {
+  maximumFractionDigits: 2,
+});
 
 const viewerConfiguration = resolveViewerOrigin(import.meta.env.VITE_VIEWER_ORIGIN);
 const viewerOrigin = viewerConfiguration.origin;
@@ -107,6 +110,9 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
   const copy = statusCopy[row.status];
   const isActive = row.status === 'queued' || row.status === 'drawing';
   const canActivate = (row.status === 'waiting' || row.status === 'error') && !busy;
+  const measurementValue = row.measurement
+    ? `${AREA_NUMBER_FORMATTER.format(row.measurement.value)} ${row.measurement.rawUnit}`
+    : '—';
   const errorDescription =
     row.error === 'unsupported'
       ? 'Ellipse недоступний у поточному режимі'
@@ -121,7 +127,7 @@ function MeasurementRowItem({ busy, index, onActivate, onCancel, row }: Measurem
           <span className="measurement-row__index">{String(index + 1).padStart(2, '0')}</span>
           <h2>Площа ураження</h2>
         </div>
-        <span className="measurement-row__value">—</span>
+        <output className="measurement-row__value">{measurementValue}</output>
       </div>
 
       <div className="measurement-row__meta">
@@ -262,6 +268,7 @@ export function App() {
         onActivationRejected: (request, reason) =>
           dispatch({ type: 'activationRejected', ...request, reason }),
         onActivationReset: request => dispatch({ type: 'activationReset', ...request }),
+        onMeasurementAdded: payload => dispatch({ type: 'measurementReceived', payload }),
       },
     });
 

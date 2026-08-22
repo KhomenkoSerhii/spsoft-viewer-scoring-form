@@ -21,7 +21,7 @@ interface CornerstoneWindow extends Window {
   };
 }
 
-test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
+test('host correlates an OHIF ellipse measurement and supports cancellation', async ({ page }) => {
   const runtimeErrors: string[] = [];
   page.on('pageerror', error => runtimeErrors.push(error.message));
 
@@ -153,6 +153,85 @@ test('host activates Ellipse in OHIF and cancels drawing', async ({ page }) => {
         payload: { reason: 'user-cancelled' },
       },
     });
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'Pan'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
+  await expect(measurementRow.getByText('Малювання…')).toBeVisible();
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  const activeViewport = viewerFrame
+    .locator('[data-cy="viewport-pane"][data-is-active="true"]')
+    .first();
+  const viewportBox = await activeViewport.boundingBox();
+
+  if (!viewportBox) {
+    throw new Error('Active OHIF viewport has no bounding box.');
+  }
+
+  await activeViewport.click({
+    position: { x: viewportBox.width * 0.42, y: viewportBox.height * 0.4 },
+  });
+  await activeViewport.click({
+    position: { x: viewportBox.width * 0.56, y: viewportBox.height * 0.52 },
+  });
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          return bridgeWindow.__spsoftBridgeMessages.find(
+            message =>
+              message.origin === 'http://localhost:3000' &&
+              message.data?.type === 'MEASUREMENT_ADDED'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toMatchObject({
+      origin: 'http://localhost:3000',
+      data: {
+        type: 'MEASUREMENT_ADDED',
+        payload: {
+          annotationId: expect.any(String),
+          measurement: {
+            kind: 'area',
+            value: expect.any(Number),
+            unit: 'mm2',
+            rawUnit: 'mm²',
+          },
+        },
+      },
+    });
+
+  await expect(measurementRow.getByText('Готово')).toBeVisible();
+  await expect(measurementRow.locator('output')).toContainText('mm²');
 
   await expect
     .poll(

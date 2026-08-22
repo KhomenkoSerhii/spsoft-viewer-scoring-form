@@ -48,6 +48,7 @@ function createHarness() {
     onActivationRejected: jest.fn(),
     onActivationReset: jest.fn(),
     onActivationSent: jest.fn(),
+    onMeasurementAdded: jest.fn(),
     onViewerReady: jest.fn(),
   };
   const controller = new HostBridgeController({
@@ -86,7 +87,44 @@ function createHarness() {
     );
   };
 
-  return { activation, announceReady, callbacks, controller, hostWindow, viewerWindow };
+  const dispatchMeasurement = ({
+    activationId = 'activation-1',
+    rowId = 'row-1',
+    viewerInstanceId = 'viewer-1',
+  }: {
+    activationId?: string;
+    rowId?: string;
+    viewerInstanceId?: string;
+  } = {}) => {
+    const payload = {
+      viewerInstanceId,
+      rowId,
+      activationId,
+      annotationId: 'annotation-1',
+      measurement: {
+        kind: 'area' as const,
+        value: 42.75,
+        unit: 'mm2' as const,
+        rawUnit: 'mm²',
+      },
+    };
+    hostWindow.dispatch(
+      createBridgeMessage(BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED, payload, 'measurement-message'),
+      'http://localhost:3000',
+      viewerWindow
+    );
+    return payload;
+  };
+
+  return {
+    activation,
+    announceReady,
+    callbacks,
+    controller,
+    dispatchMeasurement,
+    hostWindow,
+    viewerWindow,
+  };
 }
 
 describe('HostBridgeController', () => {
@@ -192,6 +230,36 @@ describe('HostBridgeController', () => {
     announceReady({ viewerInstanceId: 'viewer-2' });
 
     expect(callbacks.onActivationReset).toHaveBeenCalledWith(activation);
+  });
+
+  it('accepts one measurement matching the active Viewer session and activation', () => {
+    const { activation, announceReady, callbacks, controller, dispatchMeasurement } =
+      createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+
+    const payload = dispatchMeasurement();
+    dispatchMeasurement();
+
+    expect(callbacks.onMeasurementAdded).toHaveBeenCalledTimes(1);
+    expect(callbacks.onMeasurementAdded).toHaveBeenCalledWith(payload);
+    expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('sent');
+  });
+
+  it('ignores measurements with stale session or correlation identifiers', () => {
+    const { activation, announceReady, callbacks, controller, dispatchMeasurement } =
+      createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+
+    dispatchMeasurement({ viewerInstanceId: 'stale-viewer' });
+    dispatchMeasurement({ rowId: 'stale-row' });
+    dispatchMeasurement({ activationId: 'stale-activation' });
+
+    expect(callbacks.onMeasurementAdded).not.toHaveBeenCalled();
+    expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('busy');
   });
 
   it('deactivates an armed tool and removes its listener during disposal', () => {

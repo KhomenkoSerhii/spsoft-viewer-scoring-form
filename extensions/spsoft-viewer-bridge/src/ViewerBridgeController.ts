@@ -15,6 +15,7 @@ import type {
   ViewerBridgeServices,
   ViewportGridState,
 } from './types';
+import { extractEllipticalRoiMeasurement } from './measurement';
 
 const ELLIPTICAL_ROI: SupportedToolName = 'EllipticalROI';
 const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
@@ -69,7 +70,7 @@ export class ViewerBridgeController {
 
     this.bridgeWindow.addEventListener('message', this.handleMessage);
 
-    const { viewportGridService, toolGroupService } = this.services;
+    const { measurementService, viewportGridService, toolGroupService } = this.services;
     const viewportEvents = [
       viewportGridService.EVENTS.VIEWPORTS_READY,
       viewportGridService.EVENTS.ACTIVE_VIEWPORT_ID_CHANGED,
@@ -86,6 +87,14 @@ export class ViewerBridgeController {
 
     for (const eventName of toolGroupEvents) {
       this.subscriptions.push(toolGroupService.subscribe(eventName, this.tryAnnounceReady));
+    }
+
+    const measurementAddedEvent = measurementService.EVENTS.MEASUREMENT_ADDED;
+
+    if (typeof measurementAddedEvent === 'string') {
+      this.subscriptions.push(
+        measurementService.subscribe(measurementAddedEvent, this.handleMeasurementAdded)
+      );
     }
 
     this.installed = true;
@@ -152,6 +161,34 @@ export class ViewerBridgeController {
       this.onCommandError?.(error);
     }
     this.onHostMessage?.(message);
+  };
+
+  private readonly handleMeasurementAdded = (event: unknown): void => {
+    if (!this.modeActive || !this.viewerInstanceId || !this.armedActivation) {
+      return;
+    }
+
+    const extractedMeasurement = extractEllipticalRoiMeasurement(event);
+
+    if (!extractedMeasurement) {
+      return;
+    }
+
+    const { activationId, rowId } = this.armedActivation;
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
+      {
+        viewerInstanceId: this.viewerInstanceId,
+        rowId,
+        activationId,
+        annotationId: extractedMeasurement.annotationId,
+        measurement: extractedMeasurement.measurement,
+      },
+      this.createId()
+    );
+
+    this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
+    this.deactivateArmedTool();
   };
 
   private executeHostCommand(message: Parameters<HostMessageHandler>[0]): void {

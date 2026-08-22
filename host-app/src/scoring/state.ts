@@ -1,11 +1,18 @@
-import type { SupportedToolName, ViewerReadyPayload } from '@spsoft/viewer-protocol';
+import type {
+  AreaMeasurement,
+  MeasurementAddedPayload,
+  SupportedToolName,
+  ViewerReadyPayload,
+} from '@spsoft/viewer-protocol';
 
 export type MeasurementRowStatus = 'waiting' | 'queued' | 'drawing' | 'ready' | 'error';
 
 export interface MeasurementRow {
   activationId?: string;
+  annotationId?: string;
   error?: 'unsupported' | 'bridge-error';
   id: string;
+  measurement?: AreaMeasurement;
   status: MeasurementRowStatus;
 }
 
@@ -37,6 +44,7 @@ export type ScoringAction =
       rowId: string;
     }
   | { type: 'activationReset'; activationId: string; rowId: string }
+  | { type: 'measurementReceived'; payload: MeasurementAddedPayload }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
 export const initialScoringState: ScoringState = {
@@ -101,6 +109,21 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         status: 'error',
         error: action.reason === 'unsupported' ? 'unsupported' : 'bridge-error',
       }));
+
+    case 'measurementReceived':
+      return updateMatchingActivation(
+        state,
+        {
+          rowId: action.payload.rowId,
+          activationId: action.payload.activationId,
+        },
+        row => ({
+          id: row.id,
+          status: 'ready',
+          annotationId: action.payload.annotationId,
+          measurement: action.payload.measurement,
+        })
+      );
 
     case 'activationCancelled':
     case 'activationReset':
