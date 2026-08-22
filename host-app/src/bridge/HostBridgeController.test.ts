@@ -231,6 +231,15 @@ describe('HostBridgeController', () => {
     expect(viewerWindow.postedMessages).toHaveLength(0);
   });
 
+  it('returns unsupported without posting when the ready Viewer lacks EllipticalROI', () => {
+    const { activation, announceReady, controller, viewerWindow } = createHarness();
+    controller.install();
+    announceReady({ supportedTools: [] });
+
+    expect(controller.activate(activation)).toBe('unsupported');
+    expect(viewerWindow.postedMessages).toHaveLength(0);
+  });
+
   it('reports an immediate activation error when the Viewer command cannot be posted', () => {
     const { activation, announceReady, controller, viewerWindow } = createHarness();
     controller.install();

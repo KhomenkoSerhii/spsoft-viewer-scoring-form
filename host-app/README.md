@@ -59,11 +59,19 @@ and `px²`; unknown units are grouped only when their normalized raw labels matc
 
 ## Checks
 
-From the repository root:
+Run the complete SPSoft test suite from the repository root. This command runs the three focused
+Jest projects, then starts both local applications for the Playwright browser smoke tests:
+
+```bash
+yarn test:spsoft
+```
+
+Typecheck and build checks remain available separately:
 
 ```bash
 yarn typecheck:host
-yarn test:host
 yarn build:host
-yarn test:smoke:spsoft
 ```
+
+For a faster package-level check, run `yarn test:protocol`, `yarn test:viewer-bridge`, or
+`yarn test:host` individually.

@@ -620,7 +620,11 @@ describe('ViewerBridgeController tool commands', () => {
     });
 
     expect(onCommandError).toHaveBeenCalledWith(expect.any(Error));
-    expect(bridgeWindow.postedMessages).toHaveLength(1);
+    expect(
+      bridgeWindow.postedMessages
+        .map(({ message }) => parseBridgeMessage(message))
+        .filter(message => message?.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED)
+    ).toHaveLength(0);
   });
 });
 

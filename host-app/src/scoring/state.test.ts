@@ -1,4 +1,4 @@
-import { initialScoringState, scoringReducer } from './state';
+import { initialScoringState, scoringReducer, type ScoringState } from './state';
 
 describe('scoringReducer', () => {
   it('adds any number of independent waiting rows', () => {
@@ -59,6 +59,29 @@ describe('scoringReducer', () => {
 
     expect(secondAttempt).toBe(firstDrawing);
     expect(secondAttempt.rows[1]?.status).toBe('waiting');
+  });
+
+  it('does not reactivate a row that already has a completed measurement', () => {
+    const readyState: ScoringState = {
+      connection: { status: 'connecting' },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'ready',
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+        },
+      ],
+    };
+
+    const repeatedActivation = scoringReducer(readyState, {
+      type: 'activationRequested',
+      rowId: 'row-1',
+      activationId: 'activation-2',
+      outcome: 'sent',
+    });
+
+    expect(repeatedActivation).toBe(readyState);
   });
 
   it('ignores stale activation callbacks and resets only the matching operation', () => {
@@ -169,6 +192,34 @@ describe('scoringReducer', () => {
       id: 'row-1',
       status: 'error',
       error: 'bridge-error',
+    });
+  });
+
+  it.each([
+    ['unsupported', 'unsupported'],
+    ['error', 'bridge-error'],
+  ] as const)('records an %s rejection for the matching activation', (reason, expectedError) => {
+    const drawing = scoringReducer(
+      scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' }),
+      {
+        type: 'activationRequested',
+        rowId: 'row-1',
+        activationId: 'activation-1',
+        outcome: 'sent',
+      }
+    );
+
+    const rejected = scoringReducer(drawing, {
+      type: 'activationRejected',
+      rowId: 'row-1',
+      activationId: 'activation-1',
+      reason,
+    });
+
+    expect(rejected.rows[0]).toEqual({
+      id: 'row-1',
+      status: 'error',
+      error: expectedError,
     });
   });
 
