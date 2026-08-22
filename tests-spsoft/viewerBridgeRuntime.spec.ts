@@ -315,6 +315,31 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await expect(page.getByRole('article')).toHaveCount(3);
   await expect(page.getByRole('article').getByText('Готово')).toHaveCount(3);
   await expect(page.locator('.scoring-total output')).toHaveText(expectedTotal);
+  expect(
+    await page.locator('.measurement-row').evaluateAll(rows =>
+      rows.map(row => {
+        const title = row.querySelector('h2');
+        const value = row.querySelector('.measurement-row__value');
+
+        if (!title || !value) {
+          throw new Error('Measurement row is missing its title or value.');
+        }
+
+        const valueRange = document.createRange();
+        valueRange.selectNodeContents(value);
+        const valueLineTops = Array.from(valueRange.getClientRects(), rect => Math.round(rect.top));
+
+        return {
+          titleOverflows: title.scrollWidth > title.clientWidth,
+          valueLines: new Set(valueLineTops).size,
+        };
+      })
+    )
+  ).toEqual([
+    { titleOverflows: false, valueLines: 1 },
+    { titleOverflows: false, valueLines: 1 },
+    { titleOverflows: false, valueLines: 1 },
+  ]);
 
   await expect
     .poll(
