@@ -4,6 +4,7 @@ import {
   isViewerToHostMessage,
   parseBridgeMessage,
   type MeasurementAddedPayload,
+  type MeasurementRemovedPayload,
   type MeasurementUpdatedPayload,
   type SupportedToolName,
   type ViewerReadyPayload,
@@ -26,11 +27,19 @@ export interface ActivationRequest {
 
 export type ActivationResult = 'queued' | 'sent' | 'busy' | 'unsupported' | 'error';
 
+export interface RemovalRequest {
+  annotationId: string;
+  rowId: string;
+}
+
+export type RemovalResult = 'sent' | 'unsupported' | 'error';
+
 export interface HostBridgeCallbacks {
   onActivationRejected(request: ActivationRequest, reason: 'unsupported' | 'error'): void;
   onActivationReset(request: ActivationRequest): void;
   onActivationSent(request: ActivationRequest): void;
   onMeasurementAdded(payload: MeasurementAddedPayload): void;
+  onMeasurementRemoved(payload: MeasurementRemovedPayload): void;
   onMeasurementUpdated(payload: MeasurementUpdatedPayload): void;
   onViewerLoading(): void;
   onViewerReady(payload: ViewerReadyPayload): void;
@@ -53,6 +62,7 @@ export class HostBridgeController {
   private activeRequest: ActivationRequest | null = null;
   private readonly rowIdsByAnnotationId = new Map<string, string>();
   private readonly acceptedMessageIds = new Set<string>();
+  private readonly pendingRemovalAnnotationIds = new Set<string>();
   private installed = false;
   private pendingRequest: ActivationRequest | null = null;
   private viewerSession: ViewerReadyPayload | null = null;
@@ -110,6 +120,44 @@ export class HostBridgeController {
     this.activeRequest = null;
   }
 
+  removeMeasurement(request: RemovalRequest): RemovalResult {
+    const viewerInstanceId = this.viewerSession?.viewerInstanceId;
+    const viewerWindow = this.getViewerWindow();
+
+    if (!viewerInstanceId || !viewerWindow) {
+      return 'error';
+    }
+
+    if (!this.viewerSession?.capabilities.measurementDeletion) {
+      return 'unsupported';
+    }
+
+    if (
+      this.rowIdsByAnnotationId.get(request.annotationId) !== request.rowId ||
+      this.pendingRemovalAnnotationIds.has(request.annotationId)
+    ) {
+      return 'error';
+    }
+
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+      {
+        targetViewerInstanceId: viewerInstanceId,
+        rowId: request.rowId,
+        annotationId: request.annotationId,
+      },
+      this.createId()
+    );
+
+    try {
+      viewerWindow.postMessage(message, this.viewerOrigin);
+      this.pendingRemovalAnnotationIds.add(request.annotationId);
+      return 'sent';
+    } catch {
+      return 'error';
+    }
+  }
+
   notifyViewerLoading(): void {
     if (this.activeRequest) {
       const staleRequest = this.activeRequest;
@@ -120,6 +168,7 @@ export class HostBridgeController {
     this.viewerSession = null;
     this.rowIdsByAnnotationId.clear();
     this.acceptedMessageIds.clear();
+    this.pendingRemovalAnnotationIds.clear();
     this.callbacks.onViewerLoading();
   }
 
@@ -133,6 +182,7 @@ export class HostBridgeController {
     this.viewerSession = null;
     this.rowIdsByAnnotationId.clear();
     this.acceptedMessageIds.clear();
+    this.pendingRemovalAnnotationIds.clear();
 
     if (!this.installed) {
       return;
@@ -165,6 +215,11 @@ export class HostBridgeController {
       return;
     }
 
+    if (message.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED) {
+      this.acceptMeasurementRemoval(message.messageId, message.payload);
+      return;
+    }
+
     if (message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY) {
       return;
     }
@@ -174,6 +229,7 @@ export class HostBridgeController {
     if (previousViewerInstanceId && previousViewerInstanceId !== message.payload.viewerInstanceId) {
       this.rowIdsByAnnotationId.clear();
       this.acceptedMessageIds.clear();
+      this.pendingRemovalAnnotationIds.clear();
     }
 
     if (
@@ -222,6 +278,21 @@ export class HostBridgeController {
 
     this.acceptedMessageIds.add(messageId);
     this.callbacks.onMeasurementUpdated(payload);
+  }
+
+  private acceptMeasurementRemoval(messageId: string, payload: MeasurementRemovedPayload): void {
+    if (
+      this.acceptedMessageIds.has(messageId) ||
+      payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
+      this.rowIdsByAnnotationId.get(payload.annotationId) !== payload.rowId
+    ) {
+      return;
+    }
+
+    this.acceptedMessageIds.add(messageId);
+    this.rowIdsByAnnotationId.delete(payload.annotationId);
+    this.pendingRemovalAnnotationIds.delete(payload.annotationId);
+    this.callbacks.onMeasurementRemoved(payload);
   }
 
   private flushPendingActivation(): void {

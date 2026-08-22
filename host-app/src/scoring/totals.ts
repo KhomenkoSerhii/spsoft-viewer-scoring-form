@@ -22,7 +22,7 @@ export function calculateAreaTotals(rows: readonly MeasurementRow[]): AreaTotal[
   const totalsByUnit = new Map<string, AreaTotal>();
 
   for (const row of rows) {
-    if (row.status !== 'ready' || !row.measurement) {
+    if ((row.status !== 'ready' && row.status !== 'deleting') || !row.measurement) {
       continue;
     }
 

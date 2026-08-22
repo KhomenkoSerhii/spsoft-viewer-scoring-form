@@ -47,11 +47,19 @@ class FakeEventService implements BridgeEventService {
 }
 
 class FakeMeasurementService extends FakeEventService {
+  readonly removedMeasurementIds: string[] = [];
+
   constructor() {
     super({
       MEASUREMENT_ADDED: 'measurement-added',
+      MEASUREMENT_REMOVED: 'measurement-removed',
       MEASUREMENT_UPDATED: 'measurement-updated',
     });
+  }
+
+  remove(measurementId: string): void {
+    this.removedMeasurementIds.push(measurementId);
+    this.emit(this.EVENTS.MEASUREMENT_REMOVED!, { measurement: measurementId });
   }
 }
 
@@ -206,7 +214,7 @@ describe('ViewerBridgeController handshake', () => {
       payload: {
         viewerInstanceId: 'viewer-session-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementUpdates: true },
+        capabilities: { measurementDeletion: true, measurementUpdates: true },
       },
     });
   });
@@ -524,6 +532,94 @@ describe('ViewerBridgeController measurement correlation', () => {
       })
     );
   });
+
+  it('removes a correlated annotation on host command and confirms it to the host', () => {
+    const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+
+    const removeMessage = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+      {
+        targetViewerInstanceId: 'viewer-session-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+      'remove-1'
+    );
+    bridgeWindow.dispatchMessage({ data: removeMessage, origin: 'http://localhost:5173' });
+    bridgeWindow.dispatchMessage({ data: removeMessage, origin: 'http://localhost:5173' });
+
+    expect(measurementService.removedMeasurementIds).toEqual(['annotation-1']);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[2]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
+        payload: {
+          viewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+        },
+      })
+    );
+  });
+
+  it('reports direct Viewer deletion only for a correlated annotation', () => {
+    const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_REMOVED!, {
+      measurement: 'untracked-annotation',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_REMOVED!, {
+      measurement: 'annotation-1',
+    });
+
+    expect(bridgeWindow.postedMessages).toHaveLength(3);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[2]?.message)).toEqual(
+      expect.objectContaining({ type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED })
+    );
+  });
 });
 
 describe('ViewerBridgeController tool commands', () => {
@@ -747,7 +843,7 @@ describe('ViewerBridgeController message boundary', () => {
     expect(bridgeWindow.getListenerCount()).toBe(1);
     expect(viewportGridService.getListenerCount()).toBe(2);
     expect(toolGroupService.getListenerCount()).toBe(2);
-    expect(measurementService.getListenerCount()).toBe(2);
+    expect(measurementService.getListenerCount()).toBe(3);
 
     controller.exitMode();
 

@@ -15,7 +15,11 @@ import type {
   ViewerBridgeServices,
   ViewportGridState,
 } from './types';
-import { extractEllipticalRoiAnnotationId, extractEllipticalRoiMeasurement } from './measurement';
+import {
+  extractEllipticalRoiAnnotationId,
+  extractEllipticalRoiMeasurement,
+  extractRemovedAnnotationId,
+} from './measurement';
 
 const ELLIPTICAL_ROI: SupportedToolName = 'EllipticalROI';
 const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
@@ -92,6 +96,7 @@ export class ViewerBridgeController {
     }
 
     const measurementAddedEvent = measurementService.EVENTS.MEASUREMENT_ADDED;
+    const measurementRemovedEvent = measurementService.EVENTS.MEASUREMENT_REMOVED;
     const measurementUpdatedEvent = measurementService.EVENTS.MEASUREMENT_UPDATED;
 
     if (typeof measurementAddedEvent === 'string') {
@@ -103,6 +108,12 @@ export class ViewerBridgeController {
     if (typeof measurementUpdatedEvent === 'string') {
       this.subscriptions.push(
         measurementService.subscribe(measurementUpdatedEvent, this.handleMeasurementUpdated)
+      );
+    }
+
+    if (typeof measurementRemovedEvent === 'string') {
+      this.subscriptions.push(
+        measurementService.subscribe(measurementRemovedEvent, this.handleMeasurementRemoved)
       );
     }
 
@@ -235,6 +246,32 @@ export class ViewerBridgeController {
     this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
   };
 
+  private readonly handleMeasurementRemoved = (event: unknown): void => {
+    if (!this.modeActive || !this.viewerInstanceId) {
+      return;
+    }
+
+    const annotationId = extractRemovedAnnotationId(event);
+    const rowId = annotationId ? this.rowIdsByAnnotationId.get(annotationId) : undefined;
+
+    if (!annotationId || !rowId) {
+      return;
+    }
+
+    this.rowIdsByAnnotationId.delete(annotationId);
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
+      {
+        viewerInstanceId: this.viewerInstanceId,
+        rowId,
+        annotationId,
+      },
+      this.createId()
+    );
+
+    this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
+  };
+
   private completeArmedMeasurement(event: unknown): void {
     const extractedMeasurement = extractEllipticalRoiMeasurement(event);
 
@@ -283,6 +320,17 @@ export class ViewerBridgeController {
       }
 
       this.armedActivation = { rowId, activationId, toolName };
+      return;
+    }
+
+    if (message.type === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT) {
+      const { annotationId, rowId } = message.payload;
+
+      if (this.rowIdsByAnnotationId.get(annotationId) !== rowId) {
+        return;
+      }
+
+      this.services.measurementService.remove(annotationId);
       return;
     }
 
@@ -352,7 +400,7 @@ export class ViewerBridgeController {
       {
         viewerInstanceId: this.viewerInstanceId,
         supportedTools,
-        capabilities: { measurementUpdates: true },
+        capabilities: { measurementDeletion: true, measurementUpdates: true },
       },
       this.createId()
     );

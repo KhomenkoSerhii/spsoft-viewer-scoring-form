@@ -13,7 +13,9 @@ import type {
   DeactivateToolPayload,
   HostToViewerMessage,
   MeasurementAddedPayload,
+  MeasurementRemovedPayload,
   MeasurementUpdatedPayload,
+  RemoveMeasurementPayload,
   SupportedToolName,
   ViewerReadyPayload,
   ViewerToHostMessage,
@@ -75,6 +77,7 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
   if (
     !isNonEmptyString(value.viewerInstanceId) ||
     !Array.isArray(value.supportedTools) ||
+    typeof value.capabilities.measurementDeletion !== 'boolean' ||
     typeof value.capabilities.measurementUpdates !== 'boolean'
   ) {
     return null;
@@ -94,6 +97,7 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
     viewerInstanceId: value.viewerInstanceId,
     supportedTools,
     capabilities: {
+      measurementDeletion: value.capabilities.measurementDeletion,
       measurementUpdates: value.capabilities.measurementUpdates,
     },
   };
@@ -134,6 +138,23 @@ function parseDeactivateToolPayload(value: unknown): DeactivateToolPayload | nul
     rowId: value.rowId,
     activationId: value.activationId,
     reason: value.reason,
+  };
+}
+
+function parseRemoveMeasurementPayload(value: unknown): RemoveMeasurementPayload | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.targetViewerInstanceId) ||
+    !isNonEmptyString(value.rowId) ||
+    !isNonEmptyString(value.annotationId)
+  ) {
+    return null;
+  }
+
+  return {
+    targetViewerInstanceId: value.targetViewerInstanceId,
+    rowId: value.rowId,
+    annotationId: value.annotationId,
   };
 }
 
@@ -184,6 +205,23 @@ function parseMeasurementUpdatedPayload(value: unknown): MeasurementUpdatedPaylo
     rowId: value.rowId,
     annotationId: value.annotationId,
     measurement,
+  };
+}
+
+function parseMeasurementRemovedPayload(value: unknown): MeasurementRemovedPayload | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.viewerInstanceId) ||
+    !isNonEmptyString(value.rowId) ||
+    !isNonEmptyString(value.annotationId)
+  ) {
+    return null;
+  }
+
+  return {
+    viewerInstanceId: value.viewerInstanceId,
+    rowId: value.rowId,
+    annotationId: value.annotationId,
   };
 }
 
@@ -243,6 +281,21 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         payload,
       };
     }
+    case BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT: {
+      const payload = parseRemoveMeasurementPayload(value.payload);
+
+      if (!payload) {
+        return null;
+      }
+
+      return {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+        messageId: value.messageId,
+        payload,
+      };
+    }
     case BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED: {
       const payload = parseMeasurementAddedPayload(value.payload);
 
@@ -273,6 +326,21 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         payload,
       };
     }
+    case BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED: {
+      const payload = parseMeasurementRemovedPayload(value.payload);
+
+      if (!payload) {
+        return null;
+      }
+
+      return {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
+        messageId: value.messageId,
+        payload,
+      };
+    }
     default:
       return null;
   }
@@ -281,7 +349,8 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
 export function isHostToViewerMessage(message: BridgeMessage): message is HostToViewerMessage {
   return (
     message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL ||
-    message.type === BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL
+    message.type === BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL ||
+    message.type === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT
   );
 }
 

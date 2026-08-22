@@ -54,6 +54,7 @@ function createHarness() {
     onActivationReset: jest.fn(),
     onActivationSent: jest.fn(),
     onMeasurementAdded: jest.fn(),
+    onMeasurementRemoved: jest.fn(),
     onMeasurementUpdated: jest.fn(),
     onViewerLoading: jest.fn(),
     onViewerReady: jest.fn(),
@@ -71,10 +72,12 @@ function createHarness() {
     toolName: 'EllipticalROI',
   };
   const announceReady = ({
+    measurementDeletion = true,
     source = viewerWindow,
     supportedTools = ['EllipticalROI'] as const,
     viewerInstanceId = 'viewer-1',
   }: {
+    measurementDeletion?: boolean;
     source?: ViewerMessageWindow;
     supportedTools?: readonly ['EllipticalROI'] | readonly [];
     viewerInstanceId?: string;
@@ -85,7 +88,7 @@ function createHarness() {
         {
           viewerInstanceId,
           supportedTools: [...supportedTools],
-          capabilities: { measurementUpdates: false },
+          capabilities: { measurementDeletion, measurementUpdates: true },
         },
         `ready-${viewerInstanceId}`
       ),
@@ -159,12 +162,33 @@ function createHarness() {
     return payload;
   };
 
+  const dispatchMeasurementRemoval = ({
+    annotationId = 'annotation-1',
+    messageId = 'measurement-removed-message',
+    rowId = 'row-1',
+    viewerInstanceId = 'viewer-1',
+  }: {
+    annotationId?: string;
+    messageId?: string;
+    rowId?: string;
+    viewerInstanceId?: string;
+  } = {}) => {
+    const payload = { viewerInstanceId, rowId, annotationId };
+    hostWindow.dispatch(
+      createBridgeMessage(BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED, payload, messageId),
+      'http://localhost:3000',
+      viewerWindow
+    );
+    return payload;
+  };
+
   return {
     activation,
     announceReady,
     callbacks,
     controller,
     dispatchMeasurement,
+    dispatchMeasurementRemoval,
     dispatchMeasurementUpdate,
     hostWindow,
     viewerWindow,
@@ -182,7 +206,7 @@ describe('HostBridgeController', () => {
         {
           viewerInstanceId: 'attacker',
           supportedTools: ['EllipticalROI'],
-          capabilities: { measurementUpdates: false },
+          capabilities: { measurementDeletion: false, measurementUpdates: false },
         },
         'attacker-message'
       ),
@@ -401,6 +425,58 @@ describe('HostBridgeController', () => {
 
     expect(callbacks.onMeasurementUpdated).toHaveBeenCalledTimes(1);
     expect(callbacks.onMeasurementUpdated).toHaveBeenCalledWith(payload);
+  });
+
+  it('requests deletion and accepts one correlated removal confirmation', () => {
+    const {
+      activation,
+      announceReady,
+      callbacks,
+      controller,
+      dispatchMeasurement,
+      dispatchMeasurementRemoval,
+      viewerWindow,
+    } = createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+    dispatchMeasurement();
+
+    const request = { rowId: 'row-1', annotationId: 'annotation-1' };
+    expect(controller.removeMeasurement(request)).toBe('sent');
+    expect(controller.removeMeasurement(request)).toBe('error');
+    expect(parseBridgeMessage(viewerWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+        payload: {
+          targetViewerInstanceId: 'viewer-1',
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+        },
+      })
+    );
+
+    dispatchMeasurementRemoval({ viewerInstanceId: 'stale-viewer' });
+    dispatchMeasurementRemoval({ rowId: 'other-row' });
+    const payload = dispatchMeasurementRemoval();
+    dispatchMeasurementRemoval();
+
+    expect(callbacks.onMeasurementRemoved).toHaveBeenCalledTimes(1);
+    expect(callbacks.onMeasurementRemoved).toHaveBeenCalledWith(payload);
+  });
+
+  it('does not send deletion when the Viewer does not advertise the capability', () => {
+    const { activation, announceReady, controller, dispatchMeasurement, viewerWindow } =
+      createHarness();
+    controller.install();
+    announceReady({ measurementDeletion: false });
+    controller.activate(activation);
+    dispatchMeasurement();
+
+    expect(controller.removeMeasurement({ rowId: 'row-1', annotationId: 'annotation-1' })).toBe(
+      'unsupported'
+    );
+    expect(viewerWindow.postedMessages).toHaveLength(1);
   });
 
   it('deactivates an armed tool and removes its listener during disposal', () => {
