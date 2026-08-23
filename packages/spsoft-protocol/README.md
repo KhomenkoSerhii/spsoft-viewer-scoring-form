@@ -24,7 +24,8 @@ values.
 `VIEWER_READY` advertises support for focus navigation, live updates, and deletion. Commands carry
 the target Viewer session ID, while measurement events carry the session ID that produced them.
 Creation also includes an activation ID; focus, updates, and removals use the established
-row-to-annotation binding.
+row-to-annotation binding. For compatibility with Viewer builds that predate focus navigation, an
+omitted `capabilities.measurementFocus` is parsed as `false`; a present value must be boolean.
 
 ## Boundary validation
 

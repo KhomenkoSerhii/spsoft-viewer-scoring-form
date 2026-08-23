@@ -37,8 +37,9 @@ interface BridgeMessage {
 
 `channel` prevents unrelated `message` traffic from reaching bridge logic. `version` gives the
 parser an explicit compatibility boundary. Version 1 includes the core flow and the additive focus,
-live update, and deletion messages. A future incompatible payload change would require a new
-version.
+live update, and deletion messages. An older Viewer may omit `capabilities.measurementFocus`; the
+parser normalizes that omission to `false`, while still rejecting a non-boolean value. A future
+incompatible payload change would require a new version.
 
 Each sender creates a fresh `messageId` with `crypto.randomUUID()`. The host remembers accepted
 Viewer message IDs for the current session and ignores duplicates.
@@ -148,10 +149,11 @@ the bound row and derives new totals from reducer state. Its duplicate-message c
 bounded window of recent identifiers, so a long editing session does not grow the set indefinitely.
 
 Clicking a completed form row sends `FOCUS_MEASUREMENT` only when the current Viewer advertised
-that capability and no drawing operation is armed. Both sides verify the stored
-annotation-to-row binding. The Viewer then runs OHIF's `jumpToMeasurementViewport` command with
-the corresponding MeasurementService entry. The command selects the annotation and navigates a
-compatible viewport to its image or slice.
+that capability and no drawing operation is armed. This guard prevents focus navigation from
+redirecting the active drawing tool to another image or slice before its annotation is completed.
+Both sides verify the stored annotation-to-row binding. The Viewer then runs OHIF's
+`jumpToMeasurementViewport` command with the corresponding MeasurementService entry. The command
+selects the annotation and navigates a compatible viewport to its image or slice.
 
 For form-initiated deletion, the host sends `REMOVE_MEASUREMENT` and marks the annotation as
 pending. It removes the form row only after OHIF emits removal and the Viewer returns

@@ -126,6 +126,59 @@ describe('parseBridgeMessage', () => {
     expect(parseBridgeMessage(message)).toEqual(message);
   });
 
+  it('defaults an omitted additive focus capability to false', () => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        messageId: 'message-ready-without-focus',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          supportedTools: ['EllipticalROI'],
+          capabilities: {
+            measurementDeletion: true,
+            measurementUpdates: true,
+          },
+        },
+      })
+    ).toEqual({
+      channel: BRIDGE_CHANNEL,
+      version: BRIDGE_VERSION,
+      type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+      messageId: 'message-ready-without-focus',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+        capabilities: {
+          measurementDeletion: true,
+          measurementFocus: false,
+          measurementUpdates: true,
+        },
+      },
+    });
+  });
+
+  it('rejects a non-boolean focus capability', () => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        messageId: 'message-ready-with-invalid-focus',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          supportedTools: ['EllipticalROI'],
+          capabilities: {
+            measurementDeletion: true,
+            measurementFocus: 'true',
+            measurementUpdates: true,
+          },
+        },
+      })
+    ).toBeNull();
+  });
+
   it.each([
     ['channel', { channel: 'foreign.channel' }],
     ['version', { version: 2 }],

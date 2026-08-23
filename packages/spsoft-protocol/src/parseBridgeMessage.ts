@@ -75,11 +75,13 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
     return null;
   }
 
+  const measurementFocus = value.capabilities.measurementFocus;
+
   if (
     !isNonEmptyString(value.viewerInstanceId) ||
     !Array.isArray(value.supportedTools) ||
     typeof value.capabilities.measurementDeletion !== 'boolean' ||
-    typeof value.capabilities.measurementFocus !== 'boolean' ||
+    (measurementFocus !== undefined && typeof measurementFocus !== 'boolean') ||
     typeof value.capabilities.measurementUpdates !== 'boolean'
   ) {
     return null;
@@ -100,7 +102,7 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
     supportedTools,
     capabilities: {
       measurementDeletion: value.capabilities.measurementDeletion,
-      measurementFocus: value.capabilities.measurementFocus,
+      measurementFocus: measurementFocus ?? false,
       measurementUpdates: value.capabilities.measurementUpdates,
     },
   };

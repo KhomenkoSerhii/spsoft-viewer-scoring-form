@@ -1,5 +1,7 @@
 import {
+  BRIDGE_CHANNEL,
   BRIDGE_MESSAGE_TYPES,
+  BRIDGE_VERSION,
   createBridgeMessage,
   parseBridgeMessage,
 } from '@spsoft/viewer-protocol';
@@ -226,6 +228,38 @@ describe('HostBridgeController', () => {
     expect(callbacks.onViewerReady).toHaveBeenCalledWith(
       expect.objectContaining({ viewerInstanceId: 'viewer-1' })
     );
+  });
+
+  it('keeps the handshake usable when an older Viewer omits the focus capability', () => {
+    const { activation, callbacks, controller, hostWindow, viewerWindow } = createHarness();
+    controller.install();
+
+    hostWindow.dispatch(
+      {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        messageId: 'ready-without-focus',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          supportedTools: ['EllipticalROI'],
+          capabilities: {
+            measurementDeletion: true,
+            measurementUpdates: true,
+          },
+        },
+      },
+      'http://localhost:3000',
+      viewerWindow
+    );
+
+    expect(callbacks.onViewerReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilities: expect.objectContaining({ measurementFocus: false }),
+      })
+    );
+    expect(controller.activate(activation)).toBe('sent');
+    expect(viewerWindow.postedMessages).toHaveLength(1);
   });
 
   it('queues activation before handshake and flushes it after VIEWER_READY', () => {
