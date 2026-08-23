@@ -427,6 +427,32 @@ describe('HostBridgeController', () => {
     expect(callbacks.onMeasurementUpdated).toHaveBeenCalledWith(payload);
   });
 
+  it('bounds duplicate tracking to the most recent message identifiers', () => {
+    const {
+      activation,
+      announceReady,
+      callbacks,
+      controller,
+      dispatchMeasurement,
+      dispatchMeasurementUpdate,
+    } = createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+    dispatchMeasurement();
+
+    for (let index = 0; index <= 1_000; index += 1) {
+      dispatchMeasurementUpdate({ messageId: `measurement-update-${index}`, value: index });
+    }
+
+    expect(callbacks.onMeasurementUpdated).toHaveBeenCalledTimes(1_001);
+
+    dispatchMeasurementUpdate({ messageId: 'measurement-update-0', value: 0 });
+    dispatchMeasurementUpdate({ messageId: 'measurement-update-1000', value: 1_000 });
+
+    expect(callbacks.onMeasurementUpdated).toHaveBeenCalledTimes(1_002);
+  });
+
   it('requests deletion and accepts one correlated removal confirmation', () => {
     const {
       activation,

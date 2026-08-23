@@ -474,7 +474,7 @@ describe('ViewerBridgeController measurement correlation', () => {
     expect(bridgeWindow.postedMessages).toHaveLength(1);
   });
 
-  it('publishes live updates only for an annotation correlated by the bridge', () => {
+  it('publishes only changed live updates for an annotation correlated by the bridge', () => {
     const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
     controller.enterMode();
     makeReady();
@@ -504,6 +504,20 @@ describe('ViewerBridgeController measurement correlation', () => {
         uid: 'untracked-annotation',
         toolName: 'EllipticalROI',
         data: { target: { area: 100, areaUnit: 'mm²' } },
+      },
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 50.25, areaUnit: 'mm²' } },
       },
     });
     measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {

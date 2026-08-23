@@ -3,6 +3,7 @@ import {
   createBridgeMessage,
   isHostToViewerMessage,
   parseBridgeMessage,
+  type AreaMeasurement,
   type SupportedToolName,
 } from '@spsoft/viewer-protocol';
 
@@ -23,6 +24,19 @@ import {
 
 const ELLIPTICAL_ROI: SupportedToolName = 'EllipticalROI';
 const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
+
+function measurementsMatch(
+  previousMeasurement: AreaMeasurement | undefined,
+  nextMeasurement: AreaMeasurement
+): boolean {
+  return (
+    previousMeasurement?.kind === nextMeasurement.kind &&
+    previousMeasurement.value === nextMeasurement.value &&
+    previousMeasurement.unit === nextMeasurement.unit &&
+    previousMeasurement.rawUnit === nextMeasurement.rawUnit &&
+    previousMeasurement.calibrationType === nextMeasurement.calibrationType
+  );
+}
 
 export interface ViewerBridgeControllerOptions {
   bridgeWindow: BridgeWindow;
@@ -51,6 +65,7 @@ export class ViewerBridgeController {
   private readonly onCommandError: ((error: unknown) => void) | undefined;
   private readonly subscriptions: BridgeSubscription[] = [];
   private readonly rowIdsByAnnotationId = new Map<string, string>();
+  private readonly lastMeasurementsByAnnotationId = new Map<string, AreaMeasurement>();
   private installed = false;
   private modeActive = false;
   private readyAnnounced = false;
@@ -126,6 +141,7 @@ export class ViewerBridgeController {
     this.readyAnnounced = false;
     this.viewerInstanceId = this.createId();
     this.rowIdsByAnnotationId.clear();
+    this.lastMeasurementsByAnnotationId.clear();
     this.cancelReadyRetry();
     this.readyRetryIndex = 0;
     this.tryAnnounceReady();
@@ -137,6 +153,7 @@ export class ViewerBridgeController {
     this.readyAnnounced = false;
     this.viewerInstanceId = null;
     this.rowIdsByAnnotationId.clear();
+    this.lastMeasurementsByAnnotationId.clear();
     this.cancelReadyRetry();
     this.readyRetryIndex = 0;
 
@@ -232,6 +249,15 @@ export class ViewerBridgeController {
       return;
     }
 
+    if (
+      measurementsMatch(
+        this.lastMeasurementsByAnnotationId.get(annotationId),
+        extractedMeasurement.measurement
+      )
+    ) {
+      return;
+    }
+
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED,
       {
@@ -244,6 +270,7 @@ export class ViewerBridgeController {
     );
 
     this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
+    this.lastMeasurementsByAnnotationId.set(annotationId, extractedMeasurement.measurement);
   };
 
   private readonly handleMeasurementRemoved = (event: unknown): void => {
@@ -259,6 +286,7 @@ export class ViewerBridgeController {
     }
 
     this.rowIdsByAnnotationId.delete(annotationId);
+    this.lastMeasurementsByAnnotationId.delete(annotationId);
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
       {
@@ -281,6 +309,10 @@ export class ViewerBridgeController {
 
     const { activationId, rowId } = this.armedActivation;
     this.rowIdsByAnnotationId.set(extractedMeasurement.annotationId, rowId);
+    this.lastMeasurementsByAnnotationId.set(
+      extractedMeasurement.annotationId,
+      extractedMeasurement.measurement
+    );
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
       {
