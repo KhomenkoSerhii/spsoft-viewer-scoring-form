@@ -643,6 +643,16 @@ test('host correlates measurements and restores only persisted annotations after
   await expect(page.locator('[data-total-kind="area"] output')).toHaveText(expectedTotal);
   await expect(page.locator('[data-total-kind="length"] output')).toHaveText(lengthValue ?? '');
 
+  expect(
+    await page.locator('.measurement-list--filled').evaluate(list => ({
+      overflowY: getComputedStyle(list).overflowY,
+      scrollable: list.scrollHeight > list.clientHeight,
+      rowsClipped: Array.from(list.querySelectorAll('.measurement-row')).some(
+        row => row.scrollHeight > row.clientHeight
+      ),
+    }))
+  ).toEqual({ overflowY: 'auto', scrollable: true, rowsClipped: false });
+
   const lengthAnnotationId = await viewerFrame.locator('body').evaluate(() => {
     const cornerstoneWindow = window as CornerstoneWindow;
     return cornerstoneWindow.cornerstoneTools?.annotation.state
