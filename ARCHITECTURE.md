@@ -51,7 +51,7 @@ Viewer message IDs for the current session and ignores duplicates.
 | --- | --- | --- | --- |
 | Viewer to host | `VIEWER_READY` | `viewerInstanceId`, `supportedTools`, capability flags | Announces a ready Viewer session and its supported behavior. |
 | Host to Viewer | `ACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `toolName` | Arms `EllipticalROI` or `Length` for one typed form row. |
-| Host to Viewer | `DEACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `reason` | Cancels the matching activation and restores Pan. |
+| Host to Viewer | `DEACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `reason` | Cancels the matching activation, discards its unfinished annotation, and restores Pan. |
 | Host to Viewer | `FOCUS_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Selects a correlated annotation and navigates the Viewer to it. |
 | Host to Viewer | `REMOVE_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Removes one correlated OHIF measurement. |
 | Host to Viewer | `RESTORE_MEASUREMENTS` | `targetViewerInstanceId`, expected `rowId`/`annotationId`/`toolName` bindings | Requests restoration of only the records still owned by the form. |

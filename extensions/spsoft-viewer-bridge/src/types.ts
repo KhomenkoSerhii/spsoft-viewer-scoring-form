@@ -37,7 +37,16 @@ export interface AnnotationRepository {
   remove(annotationId: string): void;
 }
 
+export interface CornerstoneViewportService {
+  getRenderingEngine():
+    | {
+        getViewport(viewportId: string): { element?: HTMLDivElement } | undefined;
+      }
+    | undefined;
+}
+
 export interface ViewerBridgeServices {
+  cornerstoneViewportService?: CornerstoneViewportService;
   measurementService: MeasurementService;
   viewportGridService: ViewportGridService;
   toolGroupService: ToolGroupService;

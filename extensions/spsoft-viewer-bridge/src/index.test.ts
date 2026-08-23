@@ -1,5 +1,6 @@
 import type { BridgeWindow, ViewerBridgeServices } from './types';
 import { createViewerBridgeExtension } from './index';
+import type { ViewerBridgeControllerOptions } from './ViewerBridgeController';
 
 function createHarness() {
   const lifecycleController = {
@@ -8,7 +9,11 @@ function createHarness() {
     exitMode: jest.fn(),
     install: jest.fn(),
   };
-  const controllerFactory = jest.fn(() => lifecycleController);
+  let controllerOptions: ViewerBridgeControllerOptions | undefined;
+  const controllerFactory = jest.fn((options: ViewerBridgeControllerOptions) => {
+    controllerOptions = options;
+    return lifecycleController;
+  });
   const commandsManager = { runCommand: jest.fn() };
   const warn = jest.fn();
   const bridgeWindow = {
@@ -40,6 +45,7 @@ function createHarness() {
     commandsManager,
     controllerFactory,
     extension,
+    getControllerOptions: () => controllerOptions,
     lifecycleController,
     services,
     warn,
@@ -68,6 +74,7 @@ describe('viewer bridge extension lifecycle', () => {
 
     expect(controllerFactory).toHaveBeenCalledWith({
       bridgeWindow,
+      cancelActiveManipulation: expect.any(Function),
       commandsManager,
       hostOrigin: 'http://localhost:5173',
       services,
@@ -92,6 +99,37 @@ describe('viewer bridge extension lifecycle', () => {
     expect(controllerFactory).toHaveBeenCalledWith(
       expect.objectContaining({ hostOrigin: 'https://host.example' })
     );
+  });
+
+  it('cancels the active manipulation in the active Cornerstone viewport', () => {
+    const { bridgeWindow, commandsManager, extension, getControllerOptions, services } =
+      createHarness();
+    const viewportElement = {} as HTMLDivElement;
+    const cancelActiveManipulations = jest.fn(() => 'draft-annotation');
+    Object.assign(bridgeWindow, {
+      cornerstoneTools: { cancelActiveManipulations },
+    });
+    Object.assign(services, {
+      cornerstoneViewportService: {
+        getRenderingEngine: () => ({
+          getViewport: (viewportId: string) =>
+            viewportId === 'viewport-1' ? { element: viewportElement } : undefined,
+        }),
+      },
+    });
+    services.viewportGridService.getState = jest.fn(() => ({
+      activeViewportId: 'viewport-1',
+      viewports: { size: 1 },
+    }));
+    extension.preRegistration({
+      appConfig: { spsoftViewerBridge: { hostOrigin: 'http://localhost:5173' } },
+      commandsManager,
+      servicesManager: { services },
+    });
+
+    expect(getControllerOptions()?.cancelActiveManipulation?.()).toBe('draft-annotation');
+    expect(commandsManager.runCommand).not.toHaveBeenCalled();
+    expect(cancelActiveManipulations).toHaveBeenCalledWith(viewportElement);
   });
 
   it('disables the optional bridge without throwing when configuration is missing', () => {

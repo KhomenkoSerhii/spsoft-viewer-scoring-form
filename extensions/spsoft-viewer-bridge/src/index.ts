@@ -38,6 +38,7 @@ interface ViewerBridgeExtensionDependencies {
 
 interface CornerstoneWindow extends Window {
   cornerstoneTools?: {
+    cancelActiveManipulations?(element: HTMLDivElement): string | undefined;
     annotation?: {
       state?: {
         addAnnotation(annotation: Record<string, unknown>): string;
@@ -45,6 +46,31 @@ interface CornerstoneWindow extends Window {
         removeAnnotation(annotationId: string): void;
       };
     };
+  };
+}
+
+function createCancelActiveManipulation(
+  bridgeWindow: BridgeWindow,
+  services: ViewerBridgeServices
+): () => string | undefined {
+  return () => {
+    const activeViewportId = services.viewportGridService.getState().activeViewportId;
+    const element = activeViewportId
+      ? services.cornerstoneViewportService?.getRenderingEngine()?.getViewport(activeViewportId)
+          ?.element
+      : undefined;
+    const cancelActiveManipulations = (bridgeWindow as unknown as CornerstoneWindow)
+      .cornerstoneTools?.cancelActiveManipulations;
+
+    if (!element || typeof element !== 'object') {
+      throw new Error('The active Cornerstone viewport element is unavailable.');
+    }
+
+    if (typeof cancelActiveManipulations !== 'function') {
+      throw new Error('Cornerstone active-manipulation cancellation is unavailable.');
+    }
+
+    return cancelActiveManipulations(element as HTMLDivElement);
   };
 }
 
@@ -129,8 +155,13 @@ export function createViewerBridgeExtension(dependencies: ViewerBridgeExtensionD
 
       try {
         const { hostOrigin } = parseViewerBridgeConfiguration(resolvedConfiguration);
+        const bridgeWindow = getBridgeWindow();
         nextController = controllerFactory({
-          bridgeWindow: getBridgeWindow(),
+          bridgeWindow,
+          cancelActiveManipulation: createCancelActiveManipulation(
+            bridgeWindow,
+            servicesManager.services
+          ),
           commandsManager,
           hostOrigin,
           services: servicesManager.services,

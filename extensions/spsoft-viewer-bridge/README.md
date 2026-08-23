@@ -26,7 +26,7 @@ Wildcard origins and URLs containing paths, query strings, or fragments are reje
 The bridge implements the secure boundary, `VIEWER_READY` handshake, and correlated
 `ACTIVATE_TOOL`/`DEACTIVATE_TOOL` commands for `EllipticalROI` and `Length`. A valid activation arms
 the requested OHIF tool through `commandsManager`; cancellation, replacement and mode cleanup
-restore Pan.
+cancel the active Cornerstone manipulation, discard its unfinished annotation and restore Pan.
 
 The first valid `MEASUREMENT_ADDED` event for the armed tool is normalized to the shared area or
 length contract, correlated with its `rowId` and `activationId`, sent to the host, and followed by a
