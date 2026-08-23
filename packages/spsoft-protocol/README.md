@@ -18,6 +18,7 @@ untrusted.
 | Viewer → host | `MEASUREMENT_UPDATED` |
 | Viewer → host | `MEASUREMENT_REMOVED` |
 | Viewer → host | `MEASUREMENTS_RESTORED` |
+| Viewer → host | `COMMAND_REJECTED` |
 
 Every message uses channel `spsoft.viewer-bridge`, protocol version `1` and a caller-provided
 `messageId`. Callers generate IDs with `crypto.randomUUID()` so tests can supply deterministic
@@ -33,6 +34,11 @@ present value must be boolean.
 Persistence uses a command/confirmation pair. `RESTORE_MEASUREMENTS` carries a bounded, unique list
 of host-owned row/annotation/tool bindings. `MEASUREMENTS_RESTORED` returns only bindings that the
 Viewer recreated, together with their validated normalized measurements.
+
+`COMMAND_REJECTED` reports a failed `ACTIVATE_TOOL` or `REMOVE_MEASUREMENT` with the current
+`viewerInstanceId`, original row and operation identifiers, and one of `unsupported`,
+`invalid-state`, or `execution-failed`. The strict discriminated payload lets the host release only
+the matching pending operation.
 
 ## Boundary validation
 

@@ -307,6 +307,41 @@ describe('scoringReducer', () => {
     expect(removed.rows).toEqual([]);
   });
 
+  it('returns a rejected deletion to a retryable ready row', () => {
+    const readyState: ScoringState = {
+      connection: {
+        capabilities: viewerCapabilities,
+        status: 'ready',
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+      },
+      rows: [
+        {
+          id: 'row-1',
+          toolName: 'EllipticalROI',
+          status: 'ready',
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+        },
+      ],
+    };
+    const deleting = scoringReducer(readyState, {
+      type: 'deletionRequested',
+      rowId: 'row-1',
+      annotationId: 'annotation-1',
+    });
+    const rejected = scoringReducer(deleting, {
+      type: 'deletionRejected',
+      rowId: 'row-1',
+      annotationId: 'annotation-1',
+    });
+
+    expect(rejected.rows[0]).toEqual({
+      ...readyState.rows[0],
+      error: 'deletion-error',
+    });
+  });
+
   it('clears a row when its annotation is deleted directly in the Viewer', () => {
     const readyState: ScoringState = {
       connection: {
@@ -495,6 +530,32 @@ describe('scoringReducer', () => {
     };
 
     expect(scoringReducer(queued, { type: 'viewerLoading' }).rows).toEqual(queued.rows);
+  });
+
+  it('marks Viewer unavailable and releases rows that could not be restored', () => {
+    const restoring: ScoringState = {
+      connection: { status: 'connecting' },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'restoring',
+          annotationId: 'annotation-1',
+          toolName: 'EllipticalROI',
+          measurement: { kind: 'area', value: 42, unit: 'mm2', rawUnit: 'mm²' },
+        },
+        {
+          id: 'row-2',
+          status: 'queued',
+          activationId: 'activation-2',
+          toolName: 'Length',
+        },
+      ],
+    };
+
+    expect(scoringReducer(restoring, { type: 'viewerUnavailable' })).toEqual({
+      connection: { status: 'unavailable' },
+      rows: [{ id: 'row-1', status: 'waiting', toolName: 'EllipticalROI' }, restoring.rows[1]],
+    });
   });
 
   it('accepts matching restoration confirmations and resets missing annotations', () => {

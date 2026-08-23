@@ -3,6 +3,7 @@ import {
   BRIDGE_CHANNEL,
   BRIDGE_MESSAGE_TYPES,
   BRIDGE_VERSION,
+  COMMAND_REJECTION_REASONS,
   DEACTIVATION_REASONS,
   LENGTH_UNITS,
   SUPPORTED_TOOLS,
@@ -11,6 +12,7 @@ import type {
   ActivateToolPayload,
   AreaMeasurement,
   BridgeMessage,
+  CommandRejectedPayload,
   DeactivateToolPayload,
   FocusMeasurementPayload,
   HostToViewerMessage,
@@ -400,6 +402,45 @@ function parseMeasurementRemovedPayload(value: unknown): MeasurementRemovedPaylo
   };
 }
 
+function parseCommandRejectedPayload(value: unknown): CommandRejectedPayload | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.viewerInstanceId) ||
+    !isNonEmptyString(value.rowId) ||
+    !isOneOf(value.reason, COMMAND_REJECTION_REASONS)
+  ) {
+    return null;
+  }
+
+  if (
+    value.command === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL &&
+    isNonEmptyString(value.activationId)
+  ) {
+    return {
+      viewerInstanceId: value.viewerInstanceId,
+      command: BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+      rowId: value.rowId,
+      activationId: value.activationId,
+      reason: value.reason,
+    };
+  }
+
+  if (
+    value.command === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT &&
+    isNonEmptyString(value.annotationId)
+  ) {
+    return {
+      viewerInstanceId: value.viewerInstanceId,
+      command: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+      rowId: value.rowId,
+      annotationId: value.annotationId,
+      reason: value.reason,
+    };
+  }
+
+  return null;
+}
+
 export function parseBridgeMessage(value: unknown): BridgeMessage | null {
   if (
     !isRecord(value) ||
@@ -557,6 +598,21 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         channel: BRIDGE_CHANNEL,
         version: BRIDGE_VERSION,
         type: BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+        messageId: value.messageId,
+        payload,
+      };
+    }
+    case BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED: {
+      const payload = parseCommandRejectedPayload(value.payload);
+
+      if (!payload) {
+        return null;
+      }
+
+      return {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
         messageId: value.messageId,
         payload,
       };

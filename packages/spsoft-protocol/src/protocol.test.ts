@@ -160,6 +160,28 @@ describe('parseBridgeMessage', () => {
       },
       'message-restored'
     ),
+    createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+      {
+        viewerInstanceId: 'viewer-1',
+        command: BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        rowId: 'row-1',
+        activationId: 'activation-1',
+        reason: 'execution-failed',
+      },
+      'message-activation-rejected'
+    ),
+    createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+      {
+        viewerInstanceId: 'viewer-1',
+        command: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+        reason: 'invalid-state',
+      },
+      'message-removal-rejected'
+    ),
   ])('accepts $type', message => {
     expect(parseBridgeMessage(message)).toEqual(message);
   });
@@ -453,6 +475,24 @@ describe('parseBridgeMessage', () => {
         },
       })
     ).toEqual(validMessage);
+  });
+
+  it('rejects command failures without the command-specific correlation identifier', () => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+        messageId: 'invalid-rejection',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          command: BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+          reason: 'execution-failed',
+        },
+      })
+    ).toBeNull();
   });
 });
 

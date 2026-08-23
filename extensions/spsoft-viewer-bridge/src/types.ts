@@ -53,8 +53,14 @@ export interface MessageTarget {
 
 export interface BridgeWindow {
   readonly parent: MessageTarget;
-  addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
-  removeEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
+  addEventListener(
+    type: 'message' | 'pagehide',
+    listener: ((event: MessageEvent<unknown>) => void) | (() => void)
+  ): void;
+  removeEventListener(
+    type: 'message' | 'pagehide',
+    listener: ((event: MessageEvent<unknown>) => void) | (() => void)
+  ): void;
 }
 
 export type HostMessageHandler = (message: HostToViewerMessage) => void;

@@ -10,6 +10,7 @@ const PERSISTENCE_VERSION = 1;
 const STORAGE_KEY_PREFIX = 'spsoft.viewer-measurements.v1';
 const MAX_PERSISTED_MEASUREMENTS = 100;
 const MAX_SERIALIZED_LENGTH = 2_000_000;
+export const PERSISTENCE_WRITE_DELAY_MS = 250;
 
 export interface StorageLike {
   getItem(key: string): string | null;
@@ -112,23 +113,33 @@ export function getViewerStorageKey(studyInstanceUid: string): string {
 }
 
 export class ViewerPersistenceStore {
+  private cachedMeasurements: PersistedViewerMeasurement[] | null = null;
+  private dirty = false;
+  private writeTimer: ReturnType<typeof setTimeout> | null = null;
+
   constructor(
     private readonly storage: StorageLike,
     private readonly studyInstanceUid: string
   ) {}
 
   load(): PersistedViewerMeasurement[] {
+    if (this.cachedMeasurements) {
+      return [...this.cachedMeasurements];
+    }
+
     let parsed: unknown;
 
     try {
       const serialized = this.storage.getItem(getViewerStorageKey(this.studyInstanceUid));
 
       if (!serialized || serialized.length > MAX_SERIALIZED_LENGTH) {
+        this.cachedMeasurements = [];
         return [];
       }
 
       parsed = JSON.parse(serialized);
     } catch {
+      this.cachedMeasurements = [];
       return [];
     }
 
@@ -139,6 +150,7 @@ export class ViewerPersistenceStore {
       !Array.isArray(parsed.measurements) ||
       parsed.measurements.length > MAX_PERSISTED_MEASUREMENTS
     ) {
+      this.cachedMeasurements = [];
       return [];
     }
 
@@ -162,7 +174,8 @@ export class ViewerPersistenceStore {
       measurements.push(measurement);
     }
 
-    return measurements;
+    this.cachedMeasurements = measurements;
+    return [...measurements];
   }
 
   remove(annotationId: string): void {
@@ -170,10 +183,24 @@ export class ViewerPersistenceStore {
   }
 
   replace(measurements: PersistedViewerMeasurement[]): void {
+    this.cancelScheduledWrite();
+    this.cachedMeasurements = measurements.slice(0, MAX_PERSISTED_MEASUREMENTS);
+    this.dirty = true;
+    this.flush();
+  }
+
+  flush(): void {
+    this.cancelScheduledWrite();
+
+    if (!this.dirty || !this.cachedMeasurements) {
+      return;
+    }
+
+    this.dirty = false;
     const key = getViewerStorageKey(this.studyInstanceUid);
 
     try {
-      if (measurements.length === 0) {
+      if (this.cachedMeasurements.length === 0) {
         this.storage.removeItem(key);
         return;
       }
@@ -181,7 +208,7 @@ export class ViewerPersistenceStore {
       const serialized = JSON.stringify({
         version: PERSISTENCE_VERSION,
         studyInstanceUid: this.studyInstanceUid,
-        measurements: measurements.slice(0, MAX_PERSISTED_MEASUREMENTS),
+        measurements: this.cachedMeasurements,
       });
 
       if (serialized.length <= MAX_SERIALIZED_LENGTH) {
@@ -204,6 +231,28 @@ export class ViewerPersistenceStore {
       measurements[existingIndex] = measurement;
     }
 
-    this.replace(measurements);
+    this.cachedMeasurements = measurements;
+    this.dirty = true;
+    this.scheduleWrite();
+  }
+
+  private scheduleWrite(): void {
+    if (this.writeTimer !== null) {
+      return;
+    }
+
+    this.writeTimer = setTimeout(() => {
+      this.writeTimer = null;
+      this.flush();
+    }, PERSISTENCE_WRITE_DELAY_MS);
+  }
+
+  private cancelScheduledWrite(): void {
+    if (this.writeTimer === null) {
+      return;
+    }
+
+    clearTimeout(this.writeTimer);
+    this.writeTimer = null;
   }
 }

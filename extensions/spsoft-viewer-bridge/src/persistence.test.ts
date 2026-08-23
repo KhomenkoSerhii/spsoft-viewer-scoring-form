@@ -1,7 +1,12 @@
-import { getViewerStorageKey, ViewerPersistenceStore } from './persistence';
+import {
+  getViewerStorageKey,
+  PERSISTENCE_WRITE_DELAY_MS,
+  ViewerPersistenceStore,
+} from './persistence';
 
 class MemoryStorage {
   private readonly values = new Map<string, string>();
+  setItemCalls = 0;
 
   getItem(key: string): string | null {
     return this.values.get(key) ?? null;
@@ -12,6 +17,7 @@ class MemoryStorage {
   }
 
   setItem(key: string, value: string): void {
+    this.setItemCalls += 1;
     this.values.set(key, value);
   }
 }
@@ -88,5 +94,41 @@ describe('ViewerPersistenceStore', () => {
     );
 
     expect(new ViewerPersistenceStore(storage, 'study-1').load()).toEqual([]);
+  });
+
+  it('coalesces rapid updates and can flush the latest geometry immediately', () => {
+    jest.useFakeTimers();
+    const storage = new MemoryStorage();
+    const store = new ViewerPersistenceStore(storage, 'study-1');
+
+    try {
+      store.upsert({
+        annotation: createAnnotation(),
+        annotationId: 'annotation-1',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+        measurement: { kind: 'area', value: 10, unit: 'mm2', rawUnit: 'mm²' },
+      });
+      store.upsert({
+        annotation: createAnnotation(),
+        annotationId: 'annotation-1',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+        measurement: { kind: 'area', value: 12, unit: 'mm2', rawUnit: 'mm²' },
+      });
+
+      expect(storage.setItemCalls).toBe(0);
+      expect(store.load()[0]?.measurement.value).toBe(12);
+      jest.advanceTimersByTime(PERSISTENCE_WRITE_DELAY_MS - 1);
+      expect(storage.setItemCalls).toBe(0);
+
+      store.flush();
+      expect(storage.setItemCalls).toBe(1);
+      expect(new ViewerPersistenceStore(storage, 'study-1').load()[0]?.measurement.value).toBe(12);
+      jest.advanceTimersByTime(PERSISTENCE_WRITE_DELAY_MS);
+      expect(storage.setItemCalls).toBe(1);
+    } finally {
+      jest.useRealTimers();
+    }
   });
 });
