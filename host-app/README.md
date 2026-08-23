@@ -53,6 +53,9 @@ invalid or unsafe value is reported in the browser console and falls back to the
 
 The host installs its `message` listener before mounting the iframe, accepts bridge messages only
 from the configured Viewer origin and that iframe's `contentWindow`, and waits for `VIEWER_READY`.
+If the handshake does not arrive within ten seconds, the form reports that the Viewer is unavailable
+and releases rows that could not be restored. An early queued activation remains available and is
+still sent if the same iframe becomes ready later.
 
 Add an area or length row and activate its `EllipticalROI` or `Length` tool in OHIF. Only one row
 can be queued or drawing at a time. Activation requested before the Viewer is ready is queued and
@@ -68,6 +71,9 @@ confirmed Viewer annotations return to ready, while missing annotations return t
 Editing a correlated annotation in OHIF updates its form row and totals. **Delete** sends a correlated
 removal command and waits for Viewer confirmation before removing the row. If the user deletes the
 annotation directly in OHIF, the existing row is cleared and returns to the waiting state.
+If OHIF rejects activation or removal, the typed `COMMAND_REJECTED` event restores a retryable row
+instead of leaving it indefinitely in a drawing or deleting state. A five-second confirmation
+timeout provides the same recovery if removal produces no Viewer event.
 
 Clicking a completed row sends a correlated focus command. OHIF selects the linked annotation and
 navigates a compatible viewport to it. Focus is disabled while another row is queued or drawing.
@@ -78,9 +84,12 @@ completed rows and displays a separate total for every normalized unit. It never
 or combines physical and pixel units; unknown units are grouped only when their normalized raw
 labels match.
 
-The form snapshot is versioned and scoped by `VITE_VIEWER_STUDY_UID` in local storage. Completed
+The form snapshot is versioned and scoped by `VITE_VIEWER_STUDY_UID` in `sessionStorage`. Completed
 rows retain their normalized measurement and correlation IDs; transient drawing states restart as
-waiting. Invalid or unavailable storage never prevents the in-memory form from starting.
+waiting. Session storage survives reload but is isolated per top-level tab, so two tabs on the same
+study cannot overwrite each other's form. Invalid or unavailable storage never prevents the
+in-memory form from starting. Rapid updates are coalesced and the latest state is flushed on
+`pagehide`.
 
 ## Checks
 

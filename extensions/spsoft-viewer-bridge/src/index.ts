@@ -83,7 +83,7 @@ function getDefaultPersistenceOptions(): Pick<
         get: annotationId => getAnnotationState()?.getAnnotation(annotationId),
         remove: annotationId => getAnnotationState()?.removeAnnotation(annotationId),
       },
-      persistenceStore: new ViewerPersistenceStore(window.localStorage, studyInstanceUid),
+      persistenceStore: new ViewerPersistenceStore(window.sessionStorage, studyInstanceUid),
     };
   } catch {
     return {};

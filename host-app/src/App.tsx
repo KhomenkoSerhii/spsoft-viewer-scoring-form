@@ -26,6 +26,7 @@ import { calculateAreaTotals, calculateLengthTotals } from './scoring/totals';
 const DEFAULT_VIEWER_STUDY_UID = '1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5';
 const ELLIPSE_TOOL: SupportedToolName = 'EllipticalROI';
 const LENGTH_TOOL: SupportedToolName = 'Length';
+const FORM_PERSISTENCE_WRITE_DELAY_MS = 250;
 const MEASUREMENT_NUMBER_FORMATTER = new Intl.NumberFormat('uk-UA', {
   maximumFractionDigits: 2,
 });
@@ -161,11 +162,13 @@ function MeasurementRowItem({
       ? `${measurementCopy.shortLabel} недоступна у поточному режимі`
       : row.error === 'bridge-error'
         ? 'Канал Viewer тимчасово недоступний'
-        : row.status === 'drawing'
-          ? measurementCopy.drawingDescription
-          : canFocus
-            ? 'Клікніть рядок, щоб показати анотацію у Viewer'
-            : copy.description;
+        : row.error === 'deletion-error'
+          ? 'Viewer не зміг видалити анотацію. Спробуйте ще раз'
+          : row.status === 'drawing'
+            ? measurementCopy.drawingDescription
+            : canFocus
+              ? 'Клікніть рядок, щоб показати анотацію у Viewer'
+              : copy.description;
 
   return (
     <article
@@ -271,7 +274,9 @@ function ScoringPanel({
   const focusSupported =
     state.connection.status === 'ready' && state.connection.capabilities.measurementFocus;
   const connectionLabel = !connected
-    ? 'Підключення до Viewer…'
+    ? state.connection.status === 'unavailable'
+      ? 'Viewer недоступний'
+      : 'Підключення до Viewer…'
     : ellipseSupported || lengthSupported
       ? 'Viewer підключено'
       : 'Інструменти недоступні';
@@ -407,17 +412,41 @@ function outcomeForReducer(result: ActivationResult) {
 export function App() {
   const [state, dispatch] = useReducer(scoringReducer, initialScoringState, initialState => ({
     ...initialState,
-    rows: loadPersistedRows(window.localStorage, viewerStudyUid),
+    rows: loadPersistedRows(window.sessionStorage, viewerStudyUid),
   }));
   const [bridgeInstalled, setBridgeInstalled] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const bridgeRef = useRef<HostBridgeController | null>(null);
   const rowsRef = useRef(state.rows);
+  const persistenceTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   rowsRef.current = state.rows;
 
   useEffect(() => {
-    savePersistedRows(window.localStorage, viewerStudyUid, state.rows);
+    persistenceTimeoutRef.current = setTimeout(() => {
+      persistenceTimeoutRef.current = null;
+      savePersistedRows(window.sessionStorage, viewerStudyUid, state.rows);
+    }, FORM_PERSISTENCE_WRITE_DELAY_MS);
+
+    return () => {
+      if (persistenceTimeoutRef.current !== null) {
+        clearTimeout(persistenceTimeoutRef.current);
+        persistenceTimeoutRef.current = null;
+      }
+    };
   }, [state.rows]);
+
+  useEffect(() => {
+    const flushPersistedRows = () => {
+      savePersistedRows(window.sessionStorage, viewerStudyUid, rowsRef.current);
+    };
+
+    window.addEventListener('pagehide', flushPersistedRows);
+
+    return () => {
+      window.removeEventListener('pagehide', flushPersistedRows);
+      flushPersistedRows();
+    };
+  }, []);
 
   useEffect(() => {
     const bridge = new HostBridgeController({
@@ -430,12 +459,14 @@ export function App() {
         onActivationSent: request => dispatch({ type: 'activationSent', ...request }),
         onActivationRejected: (request, reason) =>
           dispatch({ type: 'activationRejected', ...request, reason }),
+        onRemovalRejected: request => dispatch({ type: 'deletionRejected', ...request }),
         onActivationReset: request => dispatch({ type: 'activationReset', ...request }),
         onMeasurementAdded: payload => dispatch({ type: 'measurementReceived', payload }),
         onMeasurementRemoved: payload => dispatch({ type: 'measurementRemoved', payload }),
         onMeasurementsRestored: payload => dispatch({ type: 'measurementsRestored', payload }),
         onMeasurementUpdated: payload => dispatch({ type: 'measurementUpdated', payload }),
         onViewerLoading: () => dispatch({ type: 'viewerLoading' }),
+        onViewerUnavailable: () => dispatch({ type: 'viewerUnavailable' }),
       },
       getRestorableMeasurements: () => getRestorableMeasurementBindings(rowsRef.current),
     });

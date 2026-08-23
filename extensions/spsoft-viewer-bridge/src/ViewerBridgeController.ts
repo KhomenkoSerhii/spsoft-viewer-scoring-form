@@ -5,6 +5,8 @@ import {
   isHostToViewerMessage,
   measurementMatchesTool,
   parseBridgeMessage,
+  type CommandRejectionReason,
+  type HostToViewerMessage,
   type Measurement,
   type MeasurementBinding,
   type RestoredMeasurement,
@@ -62,6 +64,15 @@ interface ArmedActivation {
   toolName: SupportedToolName;
 }
 
+type RejectableHostCommand = Extract<
+  HostToViewerMessage,
+  {
+    type:
+      | typeof BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL
+      | typeof BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT;
+  }
+>;
+
 export class ViewerBridgeController {
   private readonly bridgeWindow: BridgeWindow;
   private readonly commandsManager: ViewerBridgeCommandsManager;
@@ -102,6 +113,7 @@ export class ViewerBridgeController {
     }
 
     this.bridgeWindow.addEventListener('message', this.handleMessage);
+    this.bridgeWindow.addEventListener('pagehide', this.flushPersistence);
 
     const { measurementService, viewportGridService, toolGroupService } = this.services;
     const viewportEvents = [
@@ -162,6 +174,7 @@ export class ViewerBridgeController {
 
   exitMode(): void {
     this.deactivateArmedTool();
+    this.persistenceStore?.flush();
     this.modeActive = false;
     this.readyAnnounced = false;
     this.viewerInstanceId = null;
@@ -176,6 +189,7 @@ export class ViewerBridgeController {
     }
 
     this.bridgeWindow.removeEventListener('message', this.handleMessage);
+    this.bridgeWindow.removeEventListener('pagehide', this.flushPersistence);
     this.subscriptions.splice(0).forEach(subscription => subscription.unsubscribe());
     this.installed = false;
   }
@@ -211,9 +225,19 @@ export class ViewerBridgeController {
     try {
       this.executeHostCommand(message);
     } catch (error) {
+      if (
+        message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL ||
+        message.type === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT
+      ) {
+        this.publishCommandRejected(message, 'execution-failed');
+      }
       this.onCommandError?.(error);
     }
     this.onHostMessage?.(message);
+  };
+
+  private readonly flushPersistence = (): void => {
+    this.persistenceStore?.flush();
   };
 
   private readonly handleMeasurementAdded = (event: unknown): void => {
@@ -365,6 +389,7 @@ export class ViewerBridgeController {
       const toolGroup = this.services.toolGroupService.getToolGroup();
 
       if (!toolGroup?.hasTool(toolName)) {
+        this.publishCommandRejected(message, 'unsupported');
         return;
       }
 
@@ -378,6 +403,7 @@ export class ViewerBridgeController {
       this.deactivateArmedTool();
 
       if (!this.setToolActive(toolName)) {
+        this.publishCommandRejected(message, 'execution-failed');
         return;
       }
 
@@ -394,6 +420,12 @@ export class ViewerBridgeController {
       const { annotationId, rowId } = message.payload;
 
       if (this.rowIdsByAnnotationId.get(annotationId) !== rowId) {
+        this.publishCommandRejected(message, 'invalid-state');
+        return;
+      }
+
+      if (!this.services.measurementService.getMeasurement(annotationId)) {
+        this.publishCommandRejected(message, 'invalid-state');
         return;
       }
 
@@ -429,6 +461,43 @@ export class ViewerBridgeController {
     }
 
     this.deactivateArmedTool();
+  }
+
+  private publishCommandRejected(
+    message: RejectableHostCommand,
+    reason: CommandRejectionReason
+  ): void {
+    if (!this.viewerInstanceId) {
+      return;
+    }
+
+    const payload =
+      message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL
+        ? {
+            viewerInstanceId: this.viewerInstanceId,
+            command: BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+            rowId: message.payload.rowId,
+            activationId: message.payload.activationId,
+            reason,
+          }
+        : {
+            viewerInstanceId: this.viewerInstanceId,
+            command: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+            rowId: message.payload.rowId,
+            annotationId: message.payload.annotationId,
+            reason,
+          };
+    const rejection = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+      payload,
+      this.createId()
+    );
+
+    try {
+      this.bridgeWindow.parent.postMessage(rejection, this.hostOrigin);
+    } catch (error) {
+      this.onCommandError?.(error);
+    }
   }
 
   private deactivateArmedTool(): void {

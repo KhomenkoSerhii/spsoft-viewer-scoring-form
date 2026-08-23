@@ -4,6 +4,8 @@ import {
   isViewerToHostMessage,
   measurementMatchesTool,
   parseBridgeMessage,
+  type CommandRejectedPayload,
+  type CommandRejectionReason,
   type MeasurementAddedPayload,
   type MeasurementBinding,
   type MeasurementRemovedPayload,
@@ -14,6 +16,8 @@ import {
 } from '@spsoft/viewer-protocol';
 
 const ACCEPTED_MESSAGE_ID_LIMIT = 1_000;
+export const HANDSHAKE_TIMEOUT_MS = 10_000;
+export const REMOVAL_TIMEOUT_MS = 5_000;
 export const RESTORATION_TIMEOUT_MS = 5_000;
 
 export interface HostMessageWindow {
@@ -51,11 +55,13 @@ export interface HostBridgeCallbacks {
   onActivationRejected(request: ActivationRequest, reason: 'unsupported' | 'error'): void;
   onActivationReset(request: ActivationRequest): void;
   onActivationSent(request: ActivationRequest): void;
+  onRemovalRejected(request: RemovalRequest, reason: CommandRejectionReason): void;
   onMeasurementAdded(payload: MeasurementAddedPayload): void;
   onMeasurementRemoved(payload: MeasurementRemovedPayload): void;
   onMeasurementsRestored(payload: MeasurementsRestoredPayload): void;
   onMeasurementUpdated(payload: MeasurementUpdatedPayload): void;
   onViewerLoading(): void;
+  onViewerUnavailable(): void;
   onViewerReady(payload: ViewerReadyPayload): void;
 }
 
@@ -79,8 +85,9 @@ export class HostBridgeController {
   private readonly rowIdsByAnnotationId = new Map<string, string>();
   private readonly toolNamesByAnnotationId = new Map<string, SupportedToolName>();
   private readonly acceptedMessageIds = new Set<string>();
-  private readonly pendingRemovalAnnotationIds = new Set<string>();
+  private readonly pendingRemovalTimeouts = new Map<string, ReturnType<typeof setTimeout>>();
   private installed = false;
+  private handshakeTimeout: ReturnType<typeof setTimeout> | null = null;
   private pendingRequest: ActivationRequest | null = null;
   private pendingRestoration = new Map<string, MeasurementBinding>();
   private restorationTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -192,7 +199,7 @@ export class HostBridgeController {
 
     if (
       this.rowIdsByAnnotationId.get(request.annotationId) !== request.rowId ||
-      this.pendingRemovalAnnotationIds.has(request.annotationId)
+      this.pendingRemovalTimeouts.has(request.annotationId)
     ) {
       return 'error';
     }
@@ -209,7 +216,7 @@ export class HostBridgeController {
 
     try {
       viewerWindow.postMessage(message, this.viewerOrigin);
-      this.pendingRemovalAnnotationIds.add(request.annotationId);
+      this.armRemovalTimeout(request);
       return 'sent';
     } catch {
       return 'error';
@@ -227,10 +234,11 @@ export class HostBridgeController {
     this.rowIdsByAnnotationId.clear();
     this.toolNamesByAnnotationId.clear();
     this.acceptedMessageIds.clear();
-    this.pendingRemovalAnnotationIds.clear();
+    this.cancelRemovalTimeouts();
     this.pendingRestoration.clear();
     this.cancelRestorationTimeout();
     this.callbacks.onViewerLoading();
+    this.armHandshakeTimeout();
   }
 
   dispose(): void {
@@ -244,8 +252,9 @@ export class HostBridgeController {
     this.rowIdsByAnnotationId.clear();
     this.toolNamesByAnnotationId.clear();
     this.acceptedMessageIds.clear();
-    this.pendingRemovalAnnotationIds.clear();
+    this.cancelRemovalTimeouts();
     this.pendingRestoration.clear();
+    this.cancelHandshakeTimeout();
     this.cancelRestorationTimeout();
 
     if (!this.installed) {
@@ -289,6 +298,11 @@ export class HostBridgeController {
       return;
     }
 
+    if (message.type === BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED) {
+      this.acceptCommandRejection(message.messageId, message.payload);
+      return;
+    }
+
     if (message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY) {
       return;
     }
@@ -299,7 +313,7 @@ export class HostBridgeController {
       this.rowIdsByAnnotationId.clear();
       this.toolNamesByAnnotationId.clear();
       this.acceptedMessageIds.clear();
-      this.pendingRemovalAnnotationIds.clear();
+      this.cancelRemovalTimeouts();
       this.pendingRestoration.clear();
     }
 
@@ -314,6 +328,7 @@ export class HostBridgeController {
     }
 
     this.viewerSession = message.payload;
+    this.cancelHandshakeTimeout();
     this.callbacks.onViewerReady(message.payload);
     this.requestRestoration();
     this.flushPendingActivation();
@@ -409,8 +424,50 @@ export class HostBridgeController {
     this.rememberAcceptedMessageId(messageId);
     this.rowIdsByAnnotationId.delete(payload.annotationId);
     this.toolNamesByAnnotationId.delete(payload.annotationId);
-    this.pendingRemovalAnnotationIds.delete(payload.annotationId);
+    this.cancelRemovalTimeout(payload.annotationId);
     this.callbacks.onMeasurementRemoved(payload);
+  }
+
+  private acceptCommandRejection(messageId: string, payload: CommandRejectedPayload): void {
+    if (
+      this.acceptedMessageIds.has(messageId) ||
+      payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId
+    ) {
+      return;
+    }
+
+    if (payload.command === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL) {
+      if (
+        !this.activeRequest ||
+        this.activeRequest.rowId !== payload.rowId ||
+        this.activeRequest.activationId !== payload.activationId
+      ) {
+        return;
+      }
+
+      const rejectedRequest = this.activeRequest;
+      this.activeRequest = null;
+      this.rememberAcceptedMessageId(messageId);
+      this.callbacks.onActivationRejected(
+        rejectedRequest,
+        payload.reason === 'unsupported' ? 'unsupported' : 'error'
+      );
+      return;
+    }
+
+    if (
+      !this.pendingRemovalTimeouts.has(payload.annotationId) ||
+      this.rowIdsByAnnotationId.get(payload.annotationId) !== payload.rowId
+    ) {
+      return;
+    }
+
+    this.cancelRemovalTimeout(payload.annotationId);
+    this.rememberAcceptedMessageId(messageId);
+    this.callbacks.onRemovalRejected(
+      { annotationId: payload.annotationId, rowId: payload.rowId },
+      payload.reason
+    );
   }
 
   private rememberAcceptedMessageId(messageId: string): void {
@@ -489,6 +546,58 @@ export class HostBridgeController {
 
     clearTimeout(this.restorationTimeout);
     this.restorationTimeout = null;
+  }
+
+  private armHandshakeTimeout(): void {
+    this.cancelHandshakeTimeout();
+    this.handshakeTimeout = setTimeout(() => {
+      this.handshakeTimeout = null;
+
+      if (!this.viewerSession) {
+        this.callbacks.onViewerUnavailable();
+      }
+    }, HANDSHAKE_TIMEOUT_MS);
+  }
+
+  private armRemovalTimeout(request: RemovalRequest): void {
+    const timeout = setTimeout(() => {
+      if (this.pendingRemovalTimeouts.get(request.annotationId) !== timeout) {
+        return;
+      }
+
+      this.pendingRemovalTimeouts.delete(request.annotationId);
+      this.callbacks.onRemovalRejected(request, 'execution-failed');
+    }, REMOVAL_TIMEOUT_MS);
+
+    this.pendingRemovalTimeouts.set(request.annotationId, timeout);
+  }
+
+  private cancelRemovalTimeout(annotationId: string): void {
+    const timeout = this.pendingRemovalTimeouts.get(annotationId);
+
+    if (timeout === undefined) {
+      return;
+    }
+
+    clearTimeout(timeout);
+    this.pendingRemovalTimeouts.delete(annotationId);
+  }
+
+  private cancelRemovalTimeouts(): void {
+    for (const timeout of this.pendingRemovalTimeouts.values()) {
+      clearTimeout(timeout);
+    }
+
+    this.pendingRemovalTimeouts.clear();
+  }
+
+  private cancelHandshakeTimeout(): void {
+    if (this.handshakeTimeout === null) {
+      return;
+    }
+
+    clearTimeout(this.handshakeTimeout);
+    this.handshakeTimeout = null;
   }
 
   private flushPendingActivation(): void {

@@ -50,6 +50,7 @@ class FakeEventService implements BridgeEventService {
 
 class FakeMeasurementService extends FakeEventService {
   readonly removedMeasurementIds: string[] = [];
+  throwOnRemove = false;
   private readonly measurements = new Map<string, unknown>();
 
   constructor() {
@@ -69,6 +70,10 @@ class FakeMeasurementService extends FakeEventService {
   }
 
   remove(measurementId: string): void {
+    if (this.throwOnRemove) {
+      throw new Error('Measurement removal failed.');
+    }
+
     this.removedMeasurementIds.push(measurementId);
     this.measurements.delete(measurementId);
     this.emit(this.EVENTS.MEASUREMENT_REMOVED!, { measurement: measurementId });
@@ -134,17 +139,30 @@ class FakeBridgeWindow implements BridgeWindow {
     },
   };
   private readonly messageListeners = new Set<(event: MessageEvent<unknown>) => void>();
+  private readonly pagehideListeners = new Set<() => void>();
 
-  addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void {
+  addEventListener(
+    type: 'message' | 'pagehide',
+    listener: ((event: MessageEvent<unknown>) => void) | (() => void)
+  ): void {
     if (type === 'message') {
-      this.messageListeners.add(listener);
+      this.messageListeners.add(listener as (event: MessageEvent<unknown>) => void);
+      return;
     }
+
+    this.pagehideListeners.add(listener as () => void);
   }
 
-  removeEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void {
+  removeEventListener(
+    type: 'message' | 'pagehide',
+    listener: ((event: MessageEvent<unknown>) => void) | (() => void)
+  ): void {
     if (type === 'message') {
-      this.messageListeners.delete(listener);
+      this.messageListeners.delete(listener as (event: MessageEvent<unknown>) => void);
+      return;
     }
+
+    this.pagehideListeners.delete(listener as () => void);
   }
 
   dispatchMessage({
@@ -160,8 +178,16 @@ class FakeBridgeWindow implements BridgeWindow {
     this.messageListeners.forEach(listener => listener(event));
   }
 
+  dispatchPagehide(): void {
+    this.pagehideListeners.forEach(listener => listener());
+  }
+
   getListenerCount(): number {
     return this.messageListeners.size;
+  }
+
+  getPagehideListenerCount(): number {
+    return this.pagehideListeners.size;
   }
 }
 
@@ -845,6 +871,61 @@ describe('ViewerBridgeController measurement correlation', () => {
     );
   });
 
+  it('rejects a correlated removal when OHIF cannot execute it', () => {
+    const { bridgeWindow, controller, makeReady, measurementService, onCommandError } =
+      createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+    measurementService.throwOnRemove = true;
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+        },
+        'remove-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(onCommandError).toHaveBeenCalledWith(expect.any(Error));
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[2]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+        payload: {
+          viewerInstanceId: 'viewer-session-1',
+          command: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+          reason: 'execution-failed',
+        },
+      })
+    );
+  });
+
   it('reports direct Viewer deletion only for a correlated annotation', () => {
     const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
     controller.enterMode();
@@ -1257,11 +1338,53 @@ describe('ViewerBridgeController tool commands', () => {
     });
 
     expect(onCommandError).toHaveBeenCalledWith(expect.any(Error));
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+        payload: {
+          viewerInstanceId: 'viewer-session-1',
+          command: BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          reason: 'execution-failed',
+        },
+      })
+    );
     expect(
       bridgeWindow.postedMessages
         .map(({ message }) => parseBridgeMessage(message))
         .filter(message => message?.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED)
     ).toHaveLength(0);
+  });
+
+  it('rejects an activation command for a tool missing from the active group', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady } = createHarness({
+      supportsEllipse: false,
+    });
+    controller.enterMode();
+    makeReady();
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(commandsManager.runCommand).not.toHaveBeenCalled();
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+        payload: expect.objectContaining({ reason: 'unsupported' }),
+      })
+    );
   });
 });
 
@@ -1323,6 +1446,7 @@ describe('ViewerBridgeController message boundary', () => {
 
     controller.enterMode();
     expect(bridgeWindow.getListenerCount()).toBe(1);
+    expect(bridgeWindow.getPagehideListenerCount()).toBe(1);
     expect(viewportGridService.getListenerCount()).toBe(2);
     expect(toolGroupService.getListenerCount()).toBe(2);
     expect(measurementService.getListenerCount()).toBe(3);
@@ -1330,6 +1454,7 @@ describe('ViewerBridgeController message boundary', () => {
     controller.exitMode();
 
     expect(bridgeWindow.getListenerCount()).toBe(0);
+    expect(bridgeWindow.getPagehideListenerCount()).toBe(0);
     expect(viewportGridService.getListenerCount()).toBe(0);
     expect(toolGroupService.getListenerCount()).toBe(0);
     expect(measurementService.getListenerCount()).toBe(0);

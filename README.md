@@ -16,12 +16,13 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the message contract and implementa
 
 ## Implemented scope
 
-- `VIEWER_READY` handshake with one queued early activation
+- `VIEWER_READY` handshake with one queued early activation and a visible startup timeout
 - strict origin, source, protocol version, session, and payload checks
 - correlated activation, cancellation, creation, focus navigation, live updates, and deletion
+- typed command rejection so failed activation or deletion returns to a retryable UI state
 - automatic return to Pan after drawing or cancellation
 - separate area totals for `mm²`, `cm²`, `px²` and length totals for `mm`, `cm`, `px`
-- study-scoped restoration of form rows and correlated annotations after reload
+- tab- and study-scoped restoration of form rows and correlated annotations after reload
 - build-time OHIF version label in every viewport, including multi-viewport grids
 - cleanup on mode exit and React unmount
 - focused unit tests and three Playwright integration scenarios

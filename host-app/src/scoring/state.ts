@@ -21,7 +21,7 @@ export type MeasurementRowStatus =
 export interface MeasurementRow {
   activationId?: string;
   annotationId?: string;
-  error?: 'unsupported' | 'bridge-error';
+  error?: 'unsupported' | 'bridge-error' | 'deletion-error';
   id: string;
   measurement?: Measurement;
   status: MeasurementRowStatus;
@@ -31,6 +31,7 @@ export interface MeasurementRow {
 export interface ScoringState {
   connection:
     | { status: 'connecting' }
+    | { status: 'unavailable' }
     | {
         capabilities: ViewerReadyPayload['capabilities'];
         status: 'ready';
@@ -60,9 +61,11 @@ export type ScoringAction =
   | { type: 'measurementReceived'; payload: MeasurementAddedPayload }
   | { type: 'measurementUpdated'; payload: MeasurementUpdatedPayload }
   | { type: 'deletionRequested'; annotationId: string; rowId: string }
+  | { type: 'deletionRejected'; annotationId: string; rowId: string }
   | { type: 'measurementRemoved'; payload: MeasurementRemovedPayload }
   | { type: 'measurementsRestored'; payload: MeasurementsRestoredPayload }
   | { type: 'viewerLoading' }
+  | { type: 'viewerUnavailable' }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
 export const initialScoringState: ScoringState = {
@@ -86,6 +89,12 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       return {
         connection: { status: 'connecting' },
         rows: prepareRowsForRestore(state.rows),
+      };
+
+    case 'viewerUnavailable':
+      return {
+        connection: { status: 'unavailable' },
+        rows: resetRestoringRows(state.rows),
       };
 
     case 'viewerReady': {
@@ -214,7 +223,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         row.status === 'ready' &&
         row.annotationId === action.payload.annotationId &&
         measurementMatchesTool(action.payload.measurement, row.toolName)
-          ? { ...row, measurement: action.payload.measurement }
+          ? { ...row, measurement: action.payload.measurement, error: undefined }
           : row
       );
     }
@@ -222,7 +231,14 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
     case 'deletionRequested':
       return updateRow(state, action.rowId, row =>
         row.status === 'ready' && row.annotationId === action.annotationId
-          ? { ...row, status: 'deleting' }
+          ? { ...row, status: 'deleting', error: undefined }
+          : row
+      );
+
+    case 'deletionRejected':
+      return updateRow(state, action.rowId, row =>
+        row.status === 'deleting' && row.annotationId === action.annotationId
+          ? { ...row, status: 'ready', error: 'deletion-error' }
           : row
       );
 

@@ -59,6 +59,7 @@ Viewer message IDs for the current session and ignores duplicates.
 | Viewer to host | `MEASUREMENT_UPDATED` | `viewerInstanceId`, `rowId`, `annotationId`, `measurement` | Updates the value after a correlated annotation changes. |
 | Viewer to host | `MEASUREMENT_REMOVED` | `viewerInstanceId`, `rowId`, `annotationId` | Confirms removal or reports deletion initiated in OHIF. |
 | Viewer to host | `MEASUREMENTS_RESTORED` | `viewerInstanceId`, restored bindings and measurements | Confirms which persisted annotations were recreated in OHIF. |
+| Viewer to host | `COMMAND_REJECTED` | `viewerInstanceId`, command, row and operation IDs, reason | Releases a correlated activation or deletion that OHIF could not apply. |
 
 `toolName` allows `EllipticalROI` and `Length`. `reason` is `user-cancelled`, `superseded`, or
 `host-unmounted`. `supportedTools` contains only the tools present in the active OHIF tool group
@@ -142,6 +143,10 @@ that request after the handshake. A second activation is rejected as busy while 
 queued or drawing. The request therefore cannot disappear during a slow iframe startup, and two
 rows cannot claim the same annotation.
 
+Iframe load also starts a ten-second handshake timeout. If no valid `VIEWER_READY` arrives, the
+host exposes an unavailable connection state and resets rows that were waiting for restoration. It
+does not discard the single early activation: a late valid handshake still flushes that request.
+
 Every host command includes `targetViewerInstanceId`. The Viewer ignores a command addressed to a
 previous session.
 
@@ -174,6 +179,14 @@ pending. It removes the form row only after OHIF emits removal and the Viewer re
 `MEASUREMENT_REMOVED`. If deletion starts in OHIF, the same event clears the linked row and returns
 it to `waiting`. Uncorrelated removal events are ignored.
 
+Tool activation and measurement removal are the two commands that put a row into a pending UI
+state. If OHIF lacks the tool, correlation is no longer valid, or an OHIF service throws, the Viewer
+sends `COMMAND_REJECTED` with the original activation or annotation ID. The host validates source,
+session, message ID, and correlation before changing state. Activation becomes a retryable error;
+deletion returns to `ready` with its measurement intact.
+The host also applies a five-second deletion-confirmation timeout, covering a Viewer service that
+returns without throwing but never emits `MEASUREMENT_REMOVED`.
+
 ## Preventing echo loops
 
 Live values have one event direction: OHIF emits an update, the Viewer posts it, and the host
@@ -201,9 +214,11 @@ only from its own iframe.
 
 ## Reload, persistence, and cleanup
 
-The two applications have different origins, so each owns a versioned, study-scoped local storage
-record. The host stores row order, row type, normalized measurement, and correlation IDs. The
-Viewer stores only annotations created through the bridge, including their Cornerstone geometry.
+The two applications have different origins, so each owns a versioned, study-scoped
+`sessionStorage` record. Session storage survives reload and is additionally isolated by the
+top-level browsing context, preventing two tabs opened on the same study from overwriting each
+other. The host stores row order, row type, normalized measurement, and correlation IDs. The Viewer
+stores only annotations created through the bridge, including their Cornerstone geometry.
 Transient `queued`/`drawing` states are never persisted as completed measurements.
 
 Iframe load starts a new handshake. The host clears the old in-memory session and moves completed
@@ -222,6 +237,11 @@ tool, normalized measurement, referenced image, frame of reference, and finite h
 must all be valid. Storage failures leave the in-memory workflow usable. A Viewer without the
 additive persistence capability falls back to waiting rows.
 
+Host row snapshots and Viewer geometry updates use short coalescing windows to avoid synchronous
+storage writes for every drag event. Both applications flush their latest pending snapshot during
+`pagehide`; Viewer mode exit also flushes before cleanup. Deletion and restoration rewrites remain
+immediate because they change record ownership.
+
 On React unmount, the host removes its listener and deactivates an armed tool when possible. On
 OHIF mode exit, the bridge restores Pan, removes the window listener, unsubscribes from OHIF
 services, cancels readiness timers, and clears its in-memory maps.
@@ -229,11 +249,12 @@ services, cancels readiness timers, and clears its in-memory maps.
 Both iframe reload and full page reload restore completed form rows and their correlated
 annotations for the current study. Waiting rows are also retained in the form.
 
-These browser records have no application-defined expiry and are not uploaded to a backend. They
-remain on each origin until the user deletes the corresponding rows, clears site data, or the
-browser evicts local storage. A production clinical deployment would need an explicit retention
-policy and server-side controls for authentication, authorization, encryption, and auditability;
-this browser-only persistence is limited to the test task.
+These browser records are not uploaded to a backend. They remain available across reloads in the
+current tab and are discarded when its browser session ends (subject to browser session-restore
+behavior), when the user deletes the corresponding rows, or when site data is cleared. A production
+clinical deployment would need an explicit retention policy and server-side controls for
+authentication, authorization, encryption, and auditability; this browser-only persistence is
+limited to the test task.
 
 ## Build-time viewport version
 

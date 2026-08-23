@@ -40,6 +40,8 @@ the user edits its annotation. `FOCUS_MEASUREMENT` verifies the established bind
 correlated `REMOVE_MEASUREMENT` command removes the OHIF measurement; the resulting service event
 is returned as `MEASUREMENT_REMOVED`. Deletion initiated directly in OHIF uses the same event path.
 Events and commands for annotations that were not created through the bridge are ignored.
+If OHIF cannot activate a requested tool or remove a correlated measurement, the bridge returns a
+typed `COMMAND_REJECTED` event with the original correlation identifiers.
 
 Correlated annotations are stored as validated, versioned Cornerstone snapshots scoped to the
 current `StudyInstanceUIDs` query value. After `VIEWER_READY`, `RESTORE_MEASUREMENTS` supplies the
@@ -47,6 +49,10 @@ bindings still owned by the host. The bridge re-adds only their matching geometr
 OHIF `MeasurementService` recreated each measurement, replies with `MEASUREMENTS_RESTORED`, and
 discards stale Viewer-only records. This also rebuilds focus, update, and deletion correlation for
 the new Viewer session.
+
+Snapshots use tab-scoped `sessionStorage`, which survives reload without allowing another tab on
+the same study to overwrite the active session. Frequent drag updates are coalesced into one bounded
+write window; pending geometry is flushed on `pagehide` and mode exit.
 
 Mode exit restores Pan, removes the window listener, unsubscribes from OHIF services, cancels
 readiness retries, and clears session bindings.

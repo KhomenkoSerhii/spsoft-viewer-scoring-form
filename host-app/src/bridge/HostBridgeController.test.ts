@@ -11,6 +11,8 @@ import {
 
 import {
   HostBridgeController,
+  HANDSHAKE_TIMEOUT_MS,
+  REMOVAL_TIMEOUT_MS,
   RESTORATION_TIMEOUT_MS,
   type ActivationRequest,
   type HostMessageWindow,
@@ -59,11 +61,13 @@ function createHarness(restorableMeasurements: MeasurementBinding[] = []) {
     onActivationRejected: jest.fn(),
     onActivationReset: jest.fn(),
     onActivationSent: jest.fn(),
+    onRemovalRejected: jest.fn(),
     onMeasurementAdded: jest.fn(),
     onMeasurementRemoved: jest.fn(),
     onMeasurementsRestored: jest.fn(),
     onMeasurementUpdated: jest.fn(),
     onViewerLoading: jest.fn(),
+    onViewerUnavailable: jest.fn(),
     onViewerReady: jest.fn(),
   };
   const controller = new HostBridgeController({
@@ -486,6 +490,55 @@ describe('HostBridgeController', () => {
     expect(callbacks.onActivationReset).toHaveBeenCalledWith(activation);
     expect(callbacks.onViewerLoading).toHaveBeenCalledTimes(1);
     expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('queued');
+    controller.dispose();
+  });
+
+  it('reports a missing handshake without discarding an early activation', () => {
+    jest.useFakeTimers();
+    const { activation, announceReady, callbacks, controller } = createHarness();
+
+    try {
+      controller.install();
+      controller.notifyViewerLoading();
+      expect(controller.activate(activation)).toBe('queued');
+
+      jest.advanceTimersByTime(HANDSHAKE_TIMEOUT_MS);
+      expect(callbacks.onViewerUnavailable).toHaveBeenCalledTimes(1);
+      expect(callbacks.onActivationRejected).not.toHaveBeenCalled();
+
+      announceReady();
+      expect(callbacks.onActivationSent).toHaveBeenCalledWith(activation);
+    } finally {
+      controller.dispose();
+      jest.useRealTimers();
+    }
+  });
+
+  it('accepts a correlated activation rejection and allows a retry', () => {
+    const { activation, announceReady, callbacks, controller, hostWindow, viewerWindow } =
+      createHarness();
+    controller.install();
+    announceReady();
+    expect(controller.activate(activation)).toBe('sent');
+
+    hostWindow.dispatch(
+      createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+        {
+          viewerInstanceId: 'viewer-1',
+          command: BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+          rowId: activation.rowId,
+          activationId: activation.activationId,
+          reason: 'execution-failed',
+        },
+        'activation-rejected'
+      ),
+      'http://localhost:3000',
+      viewerWindow
+    );
+
+    expect(callbacks.onActivationRejected).toHaveBeenCalledWith(activation, 'error');
+    expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('sent');
   });
 
   it('accepts one measurement matching the active Viewer session and activation', () => {
@@ -732,6 +785,66 @@ describe('HostBridgeController', () => {
 
     expect(callbacks.onMeasurementRemoved).toHaveBeenCalledTimes(1);
     expect(callbacks.onMeasurementRemoved).toHaveBeenCalledWith(payload);
+  });
+
+  it('clears a rejected deletion so the same annotation can be retried', () => {
+    const {
+      activation,
+      announceReady,
+      callbacks,
+      controller,
+      dispatchMeasurement,
+      hostWindow,
+      viewerWindow,
+    } = createHarness();
+    controller.install();
+    announceReady();
+    controller.activate(activation);
+    dispatchMeasurement();
+    const request = { rowId: 'row-1', annotationId: 'annotation-1' };
+
+    expect(controller.removeMeasurement(request)).toBe('sent');
+    hostWindow.dispatch(
+      createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.COMMAND_REJECTED,
+        {
+          viewerInstanceId: 'viewer-1',
+          command: BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+          rowId: request.rowId,
+          annotationId: request.annotationId,
+          reason: 'execution-failed',
+        },
+        'removal-rejected'
+      ),
+      'http://localhost:3000',
+      viewerWindow
+    );
+
+    expect(callbacks.onRemovalRejected).toHaveBeenCalledWith(request, 'execution-failed');
+    expect(controller.removeMeasurement(request)).toBe('sent');
+    controller.dispose();
+  });
+
+  it('releases deletion when Viewer never confirms the command', () => {
+    jest.useFakeTimers();
+    const { activation, announceReady, callbacks, controller, dispatchMeasurement } =
+      createHarness();
+    const request = { rowId: 'row-1', annotationId: 'annotation-1' };
+
+    try {
+      controller.install();
+      announceReady();
+      controller.activate(activation);
+      dispatchMeasurement();
+      expect(controller.removeMeasurement(request)).toBe('sent');
+
+      jest.advanceTimersByTime(REMOVAL_TIMEOUT_MS);
+      expect(callbacks.onRemovalRejected).toHaveBeenCalledWith(request, 'execution-failed');
+      expect(controller.removeMeasurement(request)).toBe('sent');
+    } finally {
+      controller.dispose();
+      jest.useRealTimers();
+    }
   });
 
   it('does not send deletion when the Viewer does not advertise the capability', () => {

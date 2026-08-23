@@ -3,6 +3,7 @@ import {
   BRIDGE_CHANNEL,
   BRIDGE_MESSAGE_TYPES,
   BRIDGE_VERSION,
+  COMMAND_REJECTION_REASONS,
   DEACTIVATION_REASONS,
   LENGTH_UNITS,
   SUPPORTED_TOOLS,
@@ -13,6 +14,7 @@ export type SupportedToolName = (typeof SUPPORTED_TOOLS)[number];
 export type AreaUnit = (typeof AREA_UNITS)[number];
 export type LengthUnit = (typeof LENGTH_UNITS)[number];
 export type DeactivationReason = (typeof DEACTIVATION_REASONS)[number];
+export type CommandRejectionReason = (typeof COMMAND_REJECTION_REASONS)[number];
 
 export interface AreaMeasurement {
   kind: 'area';
@@ -110,6 +112,26 @@ export interface MeasurementRemovedPayload {
   annotationId: string;
 }
 
+export interface ActivateToolCommandRejectedPayload {
+  viewerInstanceId: string;
+  command: typeof BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL;
+  rowId: string;
+  activationId: string;
+  reason: CommandRejectionReason;
+}
+
+export interface RemoveMeasurementCommandRejectedPayload {
+  viewerInstanceId: string;
+  command: typeof BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT;
+  rowId: string;
+  annotationId: string;
+  reason: CommandRejectionReason;
+}
+
+export type CommandRejectedPayload =
+  | ActivateToolCommandRejectedPayload
+  | RemoveMeasurementCommandRejectedPayload;
+
 export interface BridgePayloadByType {
   VIEWER_READY: ViewerReadyPayload;
   ACTIVATE_TOOL: ActivateToolPayload;
@@ -121,6 +143,7 @@ export interface BridgePayloadByType {
   MEASUREMENT_UPDATED: MeasurementUpdatedPayload;
   MEASUREMENT_REMOVED: MeasurementRemovedPayload;
   MEASUREMENTS_RESTORED: MeasurementsRestoredPayload;
+  COMMAND_REJECTED: CommandRejectedPayload;
 }
 
 export interface BridgeMessageFor<TType extends BridgeMessageType> {
