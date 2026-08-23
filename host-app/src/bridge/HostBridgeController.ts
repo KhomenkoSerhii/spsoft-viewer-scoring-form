@@ -14,6 +14,7 @@ import {
 } from '@spsoft/viewer-protocol';
 
 const ACCEPTED_MESSAGE_ID_LIMIT = 1_000;
+export const RESTORATION_TIMEOUT_MS = 5_000;
 
 export interface HostMessageWindow {
   addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
@@ -82,6 +83,7 @@ export class HostBridgeController {
   private installed = false;
   private pendingRequest: ActivationRequest | null = null;
   private pendingRestoration = new Map<string, MeasurementBinding>();
+  private restorationTimeout: ReturnType<typeof setTimeout> | null = null;
   private viewerSession: ViewerReadyPayload | null = null;
 
   constructor(options: HostBridgeControllerOptions) {
@@ -227,6 +229,7 @@ export class HostBridgeController {
     this.acceptedMessageIds.clear();
     this.pendingRemovalAnnotationIds.clear();
     this.pendingRestoration.clear();
+    this.cancelRestorationTimeout();
     this.callbacks.onViewerLoading();
   }
 
@@ -243,6 +246,7 @@ export class HostBridgeController {
     this.acceptedMessageIds.clear();
     this.pendingRemovalAnnotationIds.clear();
     this.pendingRestoration.clear();
+    this.cancelRestorationTimeout();
 
     if (!this.installed) {
       return;
@@ -338,6 +342,7 @@ export class HostBridgeController {
     });
 
     this.rememberAcceptedMessageId(messageId);
+    this.cancelRestorationTimeout();
     this.rowIdsByAnnotationId.clear();
     this.toolNamesByAnnotationId.clear();
 
@@ -427,6 +432,7 @@ export class HostBridgeController {
     const viewerWindow = this.getViewerWindow();
     const measurements = this.getRestorableMeasurements();
 
+    this.cancelRestorationTimeout();
     this.pendingRestoration.clear();
 
     if (!viewerSession?.capabilities.statePersistence || !viewerWindow) {
@@ -450,15 +456,39 @@ export class HostBridgeController {
       this.createId()
     );
 
+    this.restorationTimeout = setTimeout(() => {
+      this.restorationTimeout = null;
+
+      if (this.viewerSession?.viewerInstanceId !== viewerSession.viewerInstanceId) {
+        return;
+      }
+
+      this.pendingRestoration.clear();
+      this.callbacks.onMeasurementsRestored({
+        viewerInstanceId: viewerSession.viewerInstanceId,
+        measurements: [],
+      });
+    }, RESTORATION_TIMEOUT_MS);
+
     try {
       viewerWindow.postMessage(message, this.viewerOrigin);
     } catch {
+      this.cancelRestorationTimeout();
       this.pendingRestoration.clear();
       this.callbacks.onMeasurementsRestored({
         viewerInstanceId: viewerSession.viewerInstanceId,
         measurements: [],
       });
     }
+  }
+
+  private cancelRestorationTimeout(): void {
+    if (this.restorationTimeout === null) {
+      return;
+    }
+
+    clearTimeout(this.restorationTimeout);
+    this.restorationTimeout = null;
   }
 
   private flushPendingActivation(): void {

@@ -214,6 +214,8 @@ measurements through OHIF `MeasurementService`, and replies with `MEASUREMENTS_R
 does the host return matching rows to `ready` and rebuild both sides' correlation maps. Missing
 records become waiting rows; Viewer records not requested by the host are removed. This
 host-authoritative intersection prevents stale or unrelated annotations from reappearing.
+If the Viewer advertises persistence but does not confirm restoration within five seconds, the host
+also returns affected rows to `waiting` instead of leaving the form blocked in `restoring`.
 
 Storage parsing is defensive: the version, study UID, bounded record count, unique IDs, supported
 tool, normalized measurement, referenced image, frame of reference, and finite handle coordinates
@@ -226,6 +228,12 @@ services, cancels readiness timers, and clears its in-memory maps.
 
 Both iframe reload and full page reload restore completed form rows and their correlated
 annotations for the current study. Waiting rows are also retained in the form.
+
+These browser records have no application-defined expiry and are not uploaded to a backend. They
+remain on each origin until the user deletes the corresponding rows, clears site data, or the
+browser evicts local storage. A production clinical deployment would need an explicit retention
+policy and server-side controls for authentication, authorization, encryption, and auditability;
+this browser-only persistence is limited to the test task.
 
 ## Units and totals
 

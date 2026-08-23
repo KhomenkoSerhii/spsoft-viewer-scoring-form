@@ -11,6 +11,7 @@ import {
 
 import {
   HostBridgeController,
+  RESTORATION_TIMEOUT_MS,
   type ActivationRequest,
   type HostMessageWindow,
   type ViewerMessageWindow,
@@ -336,6 +337,33 @@ describe('HostBridgeController', () => {
       ],
     });
     expect(controller.focusMeasurement(binding)).toBe('sent');
+  });
+
+  it('falls back from restoring when a persistent Viewer does not confirm the request', () => {
+    jest.useFakeTimers();
+    const binding = {
+      annotationId: 'annotation-restored',
+      rowId: 'row-restored',
+      toolName: 'EllipticalROI',
+    } as const;
+    const { announceReady, callbacks, controller } = createHarness([binding]);
+
+    try {
+      controller.install();
+      announceReady({ statePersistence: true });
+
+      expect(callbacks.onMeasurementsRestored).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(RESTORATION_TIMEOUT_MS);
+
+      expect(callbacks.onMeasurementsRestored).toHaveBeenCalledTimes(1);
+      expect(callbacks.onMeasurementsRestored).toHaveBeenCalledWith({
+        viewerInstanceId: 'viewer-1',
+        measurements: [],
+      });
+    } finally {
+      controller.dispose();
+      jest.useRealTimers();
+    }
   });
 
   it('queues activation before handshake and flushes it after VIEWER_READY', () => {
