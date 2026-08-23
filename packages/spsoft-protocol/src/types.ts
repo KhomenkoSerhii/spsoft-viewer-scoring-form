@@ -4,12 +4,14 @@ import {
   BRIDGE_MESSAGE_TYPES,
   BRIDGE_VERSION,
   DEACTIVATION_REASONS,
+  LENGTH_UNITS,
   SUPPORTED_TOOLS,
 } from './constants';
 
 export type BridgeMessageType = (typeof BRIDGE_MESSAGE_TYPES)[keyof typeof BRIDGE_MESSAGE_TYPES];
 export type SupportedToolName = (typeof SUPPORTED_TOOLS)[number];
 export type AreaUnit = (typeof AREA_UNITS)[number];
+export type LengthUnit = (typeof LENGTH_UNITS)[number];
 export type DeactivationReason = (typeof DEACTIVATION_REASONS)[number];
 
 export interface AreaMeasurement {
@@ -19,6 +21,16 @@ export interface AreaMeasurement {
   rawUnit: string;
   calibrationType?: string;
 }
+
+export interface LengthMeasurement {
+  kind: 'length';
+  value: number;
+  unit: LengthUnit;
+  rawUnit: string;
+  calibrationType?: string;
+}
+
+export type Measurement = AreaMeasurement | LengthMeasurement;
 
 export interface ViewerReadyPayload {
   viewerInstanceId: string;
@@ -61,14 +73,14 @@ export interface MeasurementAddedPayload {
   rowId: string;
   activationId: string;
   annotationId: string;
-  measurement: AreaMeasurement;
+  measurement: Measurement;
 }
 
 export interface MeasurementUpdatedPayload {
   viewerInstanceId: string;
   rowId: string;
   annotationId: string;
-  measurement: AreaMeasurement;
+  measurement: Measurement;
 }
 
 export interface MeasurementRemovedPayload {

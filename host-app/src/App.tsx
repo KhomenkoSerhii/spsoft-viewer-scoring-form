@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react';
 
-import type { SupportedToolName } from '@spsoft/viewer-protocol';
+import type { Measurement, SupportedToolName } from '@spsoft/viewer-protocol';
 
 import {
   HostBridgeController,
@@ -16,13 +16,32 @@ import {
   type MeasurementRowStatus,
   type ScoringState,
 } from './scoring/state';
-import { calculateAreaTotals } from './scoring/totals';
+import { calculateAreaTotals, calculateLengthTotals } from './scoring/totals';
 
 const DEFAULT_VIEWER_STUDY_UID = '1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5';
 const ELLIPSE_TOOL: SupportedToolName = 'EllipticalROI';
-const AREA_NUMBER_FORMATTER = new Intl.NumberFormat('uk-UA', {
+const LENGTH_TOOL: SupportedToolName = 'Length';
+const MEASUREMENT_NUMBER_FORMATTER = new Intl.NumberFormat('uk-UA', {
   maximumFractionDigits: 2,
 });
+
+const toolCopy: Record<
+  SupportedToolName,
+  { activationLabel: string; drawingDescription: string; rowTitle: string; shortLabel: string }
+> = {
+  EllipticalROI: {
+    activationLabel: 'Активувати Ellipse',
+    drawingDescription: 'Намалюйте еліпс на зображенні',
+    rowTitle: 'Площа ураження',
+    shortLabel: 'Площа',
+  },
+  Length: {
+    activationLabel: 'Активувати Length',
+    drawingDescription: 'Проведіть лінію на зображенні',
+    rowTitle: 'Довжина',
+    shortLabel: 'Довжина',
+  },
+};
 
 const viewerConfiguration = resolveViewerOrigin(import.meta.env.VITE_VIEWER_ORIGIN);
 const viewerOrigin = viewerConfiguration.origin;
@@ -39,7 +58,7 @@ if (viewerConfiguration.warning) {
 const statusCopy: Record<MeasurementRowStatus, { label: string; description: string }> = {
   waiting: { label: 'Очікує', description: 'Готове до активації' },
   queued: { label: 'У черзі', description: 'Очікуємо готовність Viewer' },
-  drawing: { label: 'Малювання…', description: 'Намалюйте еліпс на зображенні' },
+  drawing: { label: 'Малювання…', description: 'Завершіть вимірювання у Viewer' },
   ready: { label: 'Готово', description: 'Вимірювання отримано' },
   deleting: { label: 'Видалення…', description: 'Очікуємо підтвердження від Viewer' },
   error: { label: 'Помилка', description: 'Не вдалося активувати інструмент' },
@@ -96,7 +115,7 @@ function EmptyMeasurements() {
       </div>
       <p className="empty-state__title">Вимірювань ще немає</p>
       <p className="empty-state__description">
-        Додайте рядок і активуйте Ellipse, щоб почати малювання у Viewer.
+        Додайте рядок площі або довжини та активуйте відповідний інструмент у Viewer.
       </p>
     </div>
   );
@@ -106,7 +125,7 @@ interface MeasurementRowItemProps {
   busy: boolean;
   focusSupported: boolean;
   index: number;
-  onActivate: (rowId: string) => void;
+  onActivate: (row: MeasurementRow) => void;
   onCancel: (row: MeasurementRow) => void;
   onDelete: (row: MeasurementRow) => void;
   onFocus: (row: MeasurementRow) => void;
@@ -124,25 +143,29 @@ function MeasurementRowItem({
   row,
 }: MeasurementRowItemProps) {
   const copy = statusCopy[row.status];
+  const measurementCopy = toolCopy[row.toolName];
   const isActive = row.status === 'queued' || row.status === 'drawing';
   const canActivate = (row.status === 'waiting' || row.status === 'error') && !busy;
   const canFocus = row.status === 'ready' && focusSupported && !busy;
   const measurementValue = row.measurement
-    ? `${AREA_NUMBER_FORMATTER.format(row.measurement.value)} ${row.measurement.rawUnit}`
+    ? `${MEASUREMENT_NUMBER_FORMATTER.format(row.measurement.value)} ${row.measurement.rawUnit}`
     : '—';
   const errorDescription =
     row.error === 'unsupported'
-      ? 'Ellipse недоступний у поточному режимі'
+      ? `${measurementCopy.shortLabel} недоступна у поточному режимі`
       : row.error === 'bridge-error'
         ? 'Канал Viewer тимчасово недоступний'
-        : canFocus
-          ? 'Клікніть рядок, щоб показати анотацію у Viewer'
-          : copy.description;
+        : row.status === 'drawing'
+          ? measurementCopy.drawingDescription
+          : canFocus
+            ? 'Клікніть рядок, щоб показати анотацію у Viewer'
+            : copy.description;
 
   return (
     <article
       className={`measurement-row measurement-row--${row.status}`}
       data-row-id={row.id}
+      data-tool-name={row.toolName}
     >
       {canFocus ? (
         <button
@@ -156,7 +179,7 @@ function MeasurementRowItem({
       <div className="measurement-row__heading">
         <div>
           <span className="measurement-row__index">{String(index + 1).padStart(2, '0')}</span>
-          <h2>Площа ураження</h2>
+          <h2>{measurementCopy.rowTitle}</h2>
         </div>
         <output className="measurement-row__value">{measurementValue}</output>
       </div>
@@ -198,9 +221,9 @@ function MeasurementRowItem({
           className="measurement-row__button"
           type="button"
           disabled={!canActivate}
-          onClick={() => onActivate(row.id)}
+          onClick={() => onActivate(row)}
         >
-          Активувати Ellipse
+          {measurementCopy.activationLabel}
         </button>
       )}
     </article>
@@ -209,8 +232,8 @@ function MeasurementRowItem({
 
 interface ScoringPanelProps {
   bridgeInstalled: boolean;
-  onActivate: (rowId: string) => void;
-  onAddRow: () => void;
+  onActivate: (row: MeasurementRow) => void;
+  onAddRow: (toolName: SupportedToolName) => void;
   onCancel: (row: MeasurementRow) => void;
   onDelete: (row: MeasurementRow) => void;
   onFocus: (row: MeasurementRow) => void;
@@ -229,15 +252,18 @@ function ScoringPanel({
   const connected = state.connection.status === 'ready';
   const ellipseSupported =
     state.connection.status === 'ready' && state.connection.supportedTools.includes(ELLIPSE_TOOL);
+  const lengthSupported =
+    state.connection.status === 'ready' && state.connection.supportedTools.includes(LENGTH_TOOL);
   const focusSupported =
     state.connection.status === 'ready' && state.connection.capabilities.measurementFocus;
   const connectionLabel = !connected
     ? 'Підключення до Viewer…'
-    : ellipseSupported
+    : ellipseSupported || lengthSupported
       ? 'Viewer підключено'
-      : 'Ellipse недоступний';
+      : 'Інструменти недоступні';
   const busy = hasActiveDrawing(state);
-  const totals = calculateAreaTotals(state.rows);
+  const areaTotals = calculateAreaTotals(state.rows);
+  const lengthTotals = calculateLengthTotals(state.rows);
 
   return (
     <aside
@@ -262,15 +288,29 @@ function ScoringPanel({
         </p>
       </header>
 
-      <button
-        className="add-measurement"
-        type="button"
-        disabled={!bridgeInstalled}
-        onClick={onAddRow}
+      <div
+        className="add-measurement-group"
+        aria-label="Додати тип вимірювання"
       >
-        <span aria-hidden="true">＋</span>
-        Додати вимірювання
-      </button>
+        <button
+          className="add-measurement"
+          type="button"
+          disabled={!bridgeInstalled}
+          onClick={() => onAddRow(ELLIPSE_TOOL)}
+        >
+          <span aria-hidden="true">＋</span>
+          Додати площу
+        </button>
+        <button
+          className="add-measurement add-measurement--secondary"
+          type="button"
+          disabled={!bridgeInstalled}
+          onClick={() => onAddRow(LENGTH_TOOL)}
+        >
+          <span aria-hidden="true">＋</span>
+          Додати довжину
+        </button>
+      </div>
 
       <div
         className={`measurement-list ${state.rows.length ? 'measurement-list--filled' : ''}`}
@@ -296,27 +336,53 @@ function ScoringPanel({
       </div>
 
       <footer
-        className="scoring-total"
+        className="scoring-totals"
         aria-live="polite"
       >
-        <span>Разом</span>
-        <div className="scoring-total__values">
-          {totals.length ? (
-            totals.map(total => (
-              <output
-                key={total.key}
-                aria-label={`Разом ${total.displayUnit}`}
-                data-total-key={total.key}
-              >
-                {AREA_NUMBER_FORMATTER.format(total.value)} {total.displayUnit}
-              </output>
-            ))
-          ) : (
-            <output>—</output>
-          )}
-        </div>
+        <MeasurementTotals
+          kind="area"
+          label="Площа"
+          totals={areaTotals}
+        />
+        <MeasurementTotals
+          kind="length"
+          label="Довжина"
+          totals={lengthTotals}
+        />
       </footer>
     </aside>
+  );
+}
+
+interface MeasurementTotalsProps {
+  kind: Measurement['kind'];
+  label: string;
+  totals: Array<{ displayUnit: string; key: string; value: number }>;
+}
+
+function MeasurementTotals({ kind, label, totals }: MeasurementTotalsProps) {
+  return (
+    <section
+      className="scoring-total"
+      data-total-kind={kind}
+    >
+      <span>{label}</span>
+      <div className="scoring-total__values">
+        {totals.length ? (
+          totals.map(total => (
+            <output
+              key={total.key}
+              aria-label={`${label} разом ${total.displayUnit}`}
+              data-total-key={total.key}
+            >
+              {MEASUREMENT_NUMBER_FORMATTER.format(total.value)} {total.displayUnit}
+            </output>
+          ))
+        ) : (
+          <output>—</output>
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -359,15 +425,15 @@ export function App() {
     };
   }, []);
 
-  const handleAddRow = useCallback(() => {
-    dispatch({ type: 'rowAdded', rowId: window.crypto.randomUUID() });
+  const handleAddRow = useCallback((toolName: SupportedToolName) => {
+    dispatch({ type: 'rowAdded', rowId: window.crypto.randomUUID(), toolName });
   }, []);
 
   const handleViewerLoad = useCallback(() => {
     bridgeRef.current?.notifyViewerLoading();
   }, []);
 
-  const handleActivate = useCallback((rowId: string) => {
+  const handleActivate = useCallback((row: MeasurementRow) => {
     const bridge = bridgeRef.current;
 
     if (!bridge) {
@@ -375,11 +441,15 @@ export function App() {
     }
 
     const activationId = window.crypto.randomUUID();
-    const request: ActivationRequest = { rowId, activationId, toolName: ELLIPSE_TOOL };
+    const request: ActivationRequest = {
+      rowId: row.id,
+      activationId,
+      toolName: row.toolName,
+    };
     const outcome = outcomeForReducer(bridge.activate(request));
 
     if (outcome) {
-      dispatch({ type: 'activationRequested', rowId, activationId, outcome });
+      dispatch({ type: 'activationRequested', rowId: row.id, activationId, outcome });
     }
   }, []);
 
@@ -391,7 +461,7 @@ export function App() {
     const request: ActivationRequest = {
       rowId: row.id,
       activationId: row.activationId,
-      toolName: ELLIPSE_TOOL,
+      toolName: row.toolName,
     };
     bridgeRef.current?.cancel(request);
     dispatch({ type: 'activationCancelled', rowId: row.id, activationId: row.activationId });

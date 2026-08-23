@@ -1,8 +1,14 @@
-import { createAreaMeasurement, type AreaMeasurement } from '@spsoft/viewer-protocol';
+import {
+  createAreaMeasurement,
+  createLengthMeasurement,
+  SUPPORTED_TOOLS,
+  type Measurement,
+  type SupportedToolName,
+} from '@spsoft/viewer-protocol';
 
-interface ExtractedAreaMeasurement {
+interface ExtractedMeasurement {
   annotationId: string;
-  measurement: AreaMeasurement;
+  measurement: Measurement;
 }
 
 type UnknownRecord = Record<string, unknown>;
@@ -11,7 +17,14 @@ function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
-function getEllipticalRoiMeasurement(event: unknown): UnknownRecord | null {
+function isSupportedToolName(value: unknown): value is SupportedToolName {
+  return typeof value === 'string' && SUPPORTED_TOOLS.includes(value as SupportedToolName);
+}
+
+function getSupportedMeasurement(
+  event: unknown,
+  expectedToolName?: SupportedToolName
+): UnknownRecord | null {
   if (!isRecord(event) || !isRecord(event.measurement)) {
     return null;
   }
@@ -19,7 +32,8 @@ function getEllipticalRoiMeasurement(event: unknown): UnknownRecord | null {
   const { measurement } = event;
 
   if (
-    measurement.toolName !== 'EllipticalROI' ||
+    !isSupportedToolName(measurement.toolName) ||
+    (expectedToolName !== undefined && measurement.toolName !== expectedToolName) ||
     typeof measurement.uid !== 'string' ||
     !measurement.uid.trim()
   ) {
@@ -29,8 +43,11 @@ function getEllipticalRoiMeasurement(event: unknown): UnknownRecord | null {
   return measurement;
 }
 
-export function extractEllipticalRoiAnnotationId(event: unknown): string | null {
-  const measurement = getEllipticalRoiMeasurement(event);
+export function extractSupportedMeasurementAnnotationId(
+  event: unknown,
+  expectedToolName?: SupportedToolName
+): string | null {
+  const measurement = getSupportedMeasurement(event, expectedToolName);
   return measurement ? (measurement.uid as string) : null;
 }
 
@@ -42,22 +59,40 @@ export function extractRemovedAnnotationId(event: unknown): string | null {
   return event.measurement;
 }
 
-export function extractEllipticalRoiMeasurement(event: unknown): ExtractedAreaMeasurement | null {
-  const measurement = getEllipticalRoiMeasurement(event);
+export function extractSupportedMeasurement(
+  event: unknown,
+  expectedToolName?: SupportedToolName
+): ExtractedMeasurement | null {
+  const measurement = getSupportedMeasurement(event, expectedToolName);
 
   if (!measurement || !isRecord(measurement.data)) {
     return null;
   }
 
   for (const value of Object.values(measurement.data)) {
-    if (!isRecord(value) || typeof value.area !== 'number' || typeof value.areaUnit !== 'string') {
+    if (!isRecord(value)) {
       continue;
     }
 
     try {
+      const normalizedMeasurement =
+        measurement.toolName === 'EllipticalROI' &&
+        typeof value.area === 'number' &&
+        typeof value.areaUnit === 'string'
+          ? createAreaMeasurement(value.area, value.areaUnit)
+          : measurement.toolName === 'Length' &&
+              typeof value.length === 'number' &&
+              typeof value.unit === 'string'
+            ? createLengthMeasurement(value.length, value.unit)
+            : null;
+
+      if (!normalizedMeasurement) {
+        continue;
+      }
+
       return {
         annotationId: measurement.uid as string,
-        measurement: createAreaMeasurement(value.area, value.areaUnit),
+        measurement: normalizedMeasurement,
       };
     } catch {
       // Ignore incomplete or invalid stats and keep waiting for a valid completed annotation.

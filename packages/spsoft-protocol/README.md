@@ -34,10 +34,12 @@ Use `parseBridgeMessage` before reading an incoming payload, then apply
 also verify `MessageEvent.origin` and `MessageEvent.source`; those checks depend on the iframe
 and therefore stay outside this transport-only package.
 
-Area measurements keep both a canonical `unit` for grouping and the exact OHIF `rawUnit` for
-diagnostics. `normalizeAreaUnit` supports `mm²`, `cm²`, `px²` and calibration suffixes such as
-`ERMF` or `US Region`. Use `createAreaMeasurement` to keep those fields consistent. For totals,
-use `getAreaAggregationKey`; unknown raw units receive separate aggregation buckets.
+Measurements form a discriminated `area | length` union and keep both a canonical `unit` for
+grouping and the exact OHIF `rawUnit` for diagnostics. Area normalization supports `mm²`, `cm²`,
+and `px²`; length normalization supports `mm`, `cm`, and `px`. Calibration suffixes such as `ERMF`
+or `US Region` are retained. Use the matching creation and aggregation helpers; unknown raw units
+receive separate aggregation buckets. `measurementMatchesTool` is the shared runtime rule that
+binds `area` to `EllipticalROI` and `length` to `Length`.
 
 The complete payload table and lifecycle are documented in the root
 [`ARCHITECTURE.md`](../../ARCHITECTURE.md).

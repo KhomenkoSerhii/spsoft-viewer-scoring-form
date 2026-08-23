@@ -1,9 +1,10 @@
 import {
   BRIDGE_MESSAGE_TYPES,
+  SUPPORTED_TOOLS,
   createBridgeMessage,
   isHostToViewerMessage,
   parseBridgeMessage,
-  type AreaMeasurement,
+  type Measurement,
   type SupportedToolName,
 } from '@spsoft/viewer-protocol';
 
@@ -17,17 +18,16 @@ import type {
   ViewportGridState,
 } from './types';
 import {
-  extractEllipticalRoiAnnotationId,
-  extractEllipticalRoiMeasurement,
   extractRemovedAnnotationId,
+  extractSupportedMeasurement,
+  extractSupportedMeasurementAnnotationId,
 } from './measurement';
 
-const ELLIPTICAL_ROI: SupportedToolName = 'EllipticalROI';
 const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
 
 function measurementsMatch(
-  previousMeasurement: AreaMeasurement | undefined,
-  nextMeasurement: AreaMeasurement
+  previousMeasurement: Measurement | undefined,
+  nextMeasurement: Measurement
 ): boolean {
   return (
     previousMeasurement?.kind === nextMeasurement.kind &&
@@ -65,7 +65,8 @@ export class ViewerBridgeController {
   private readonly onCommandError: ((error: unknown) => void) | undefined;
   private readonly subscriptions: BridgeSubscription[] = [];
   private readonly rowIdsByAnnotationId = new Map<string, string>();
-  private readonly lastMeasurementsByAnnotationId = new Map<string, AreaMeasurement>();
+  private readonly toolNamesByAnnotationId = new Map<string, SupportedToolName>();
+  private readonly lastMeasurementsByAnnotationId = new Map<string, Measurement>();
   private installed = false;
   private modeActive = false;
   private readyAnnounced = false;
@@ -141,6 +142,7 @@ export class ViewerBridgeController {
     this.readyAnnounced = false;
     this.viewerInstanceId = this.createId();
     this.rowIdsByAnnotationId.clear();
+    this.toolNamesByAnnotationId.clear();
     this.lastMeasurementsByAnnotationId.clear();
     this.cancelReadyRetry();
     this.readyRetryIndex = 0;
@@ -153,6 +155,7 @@ export class ViewerBridgeController {
     this.readyAnnounced = false;
     this.viewerInstanceId = null;
     this.rowIdsByAnnotationId.clear();
+    this.toolNamesByAnnotationId.clear();
     this.lastMeasurementsByAnnotationId.clear();
     this.cancelReadyRetry();
     this.readyRetryIndex = 0;
@@ -207,7 +210,10 @@ export class ViewerBridgeController {
       return;
     }
 
-    const annotationId = extractEllipticalRoiAnnotationId(event);
+    const annotationId = extractSupportedMeasurementAnnotationId(
+      event,
+      this.armedActivation.toolName
+    );
 
     if (!annotationId) {
       return;
@@ -229,7 +235,7 @@ export class ViewerBridgeController {
       return;
     }
 
-    const annotationId = extractEllipticalRoiAnnotationId(event);
+    const annotationId = extractSupportedMeasurementAnnotationId(event);
 
     if (!annotationId) {
       return;
@@ -243,7 +249,8 @@ export class ViewerBridgeController {
     }
 
     const rowId = this.rowIdsByAnnotationId.get(annotationId);
-    const extractedMeasurement = extractEllipticalRoiMeasurement(event);
+    const toolName = this.toolNamesByAnnotationId.get(annotationId);
+    const extractedMeasurement = toolName ? extractSupportedMeasurement(event, toolName) : null;
 
     if (!rowId || !extractedMeasurement) {
       return;
@@ -286,6 +293,7 @@ export class ViewerBridgeController {
     }
 
     this.rowIdsByAnnotationId.delete(annotationId);
+    this.toolNamesByAnnotationId.delete(annotationId);
     this.lastMeasurementsByAnnotationId.delete(annotationId);
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
@@ -301,14 +309,17 @@ export class ViewerBridgeController {
   };
 
   private completeArmedMeasurement(event: unknown): void {
-    const extractedMeasurement = extractEllipticalRoiMeasurement(event);
+    const extractedMeasurement = this.armedActivation
+      ? extractSupportedMeasurement(event, this.armedActivation.toolName)
+      : null;
 
     if (!extractedMeasurement || !this.viewerInstanceId || !this.armedActivation) {
       return;
     }
 
-    const { activationId, rowId } = this.armedActivation;
+    const { activationId, rowId, toolName } = this.armedActivation;
     this.rowIdsByAnnotationId.set(extractedMeasurement.annotationId, rowId);
+    this.toolNamesByAnnotationId.set(extractedMeasurement.annotationId, toolName);
     this.lastMeasurementsByAnnotationId.set(
       extractedMeasurement.annotationId,
       extractedMeasurement.measurement
@@ -444,9 +455,7 @@ export class ViewerBridgeController {
       return;
     }
 
-    const supportedTools: SupportedToolName[] = toolGroup.hasTool(ELLIPTICAL_ROI)
-      ? [ELLIPTICAL_ROI]
-      : [];
+    const supportedTools = SUPPORTED_TOOLS.filter(toolName => toolGroup.hasTool(toolName));
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.VIEWER_READY,
       {

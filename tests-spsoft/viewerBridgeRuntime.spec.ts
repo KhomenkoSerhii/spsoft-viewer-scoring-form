@@ -41,14 +41,16 @@ interface CornerstoneWindow extends Window {
   };
 }
 
-async function activateAndDrawEllipse(
+async function activateAndDrawMeasurement(
   measurementRow: Locator,
   viewerFrame: FrameLocator,
   activeViewport: Locator,
+  toolName: 'EllipticalROI' | 'Length',
   start: { x: number; y: number },
   end: { x: number; y: number }
 ) {
-  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
+  const activationLabel = toolName === 'EllipticalROI' ? 'Активувати Ellipse' : 'Активувати Length';
+  await measurementRow.getByRole('button', { name: activationLabel }).click();
   await expect(measurementRow.getByText('Малювання…')).toBeVisible();
 
   await expect
@@ -56,13 +58,15 @@ async function activateAndDrawEllipse(
       () =>
         viewerFrame.locator('body').evaluate(() => {
           const cornerstoneWindow = window as CornerstoneWindow;
-          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
-            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          return (
+            cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().map(toolGroup =>
+              toolGroup.getActivePrimaryMouseButtonTool()
+            ) ?? []
           );
         }),
       { timeout: 30_000 }
     )
-    .toBe(true);
+    .toContain(toolName);
 
   const viewportBox = await activeViewport.boundingBox();
 
@@ -159,7 +163,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
 
   await expect(page.getByText('Viewer підключено')).toBeVisible();
 
-  await page.getByRole('button', { name: 'Додати вимірювання' }).click();
+  await page.getByRole('button', { name: 'Додати площу' }).click();
   const measurementRow = page.getByRole('article').first();
   await expect(measurementRow.getByText('Очікує')).toBeVisible();
 
@@ -244,10 +248,11 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   const activeViewport = viewerFrame
     .locator('[data-cy="viewport-pane"][data-is-active="true"]')
     .first();
-  await activateAndDrawEllipse(
+  await activateAndDrawMeasurement(
     measurementRow,
     viewerFrame,
     activeViewport,
+    'EllipticalROI',
     { x: 0.42, y: 0.4 },
     { x: 0.56, y: 0.52 }
   );
@@ -464,22 +469,24 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     .toBeGreaterThan(updateCountBeforeDrag);
   await expect(measurementRow.locator('output')).not.toHaveText(valueBeforeDrag ?? '');
 
-  await page.getByRole('button', { name: 'Додати вимірювання' }).click();
+  await page.getByRole('button', { name: 'Додати площу' }).click();
   const secondMeasurementRow = page.getByRole('article').nth(1);
-  await activateAndDrawEllipse(
+  await activateAndDrawMeasurement(
     secondMeasurementRow,
     viewerFrame,
     activeViewport,
+    'EllipticalROI',
     { x: 0.58, y: 0.28 },
     { x: 0.68, y: 0.38 }
   );
 
-  await page.getByRole('button', { name: 'Додати вимірювання' }).click();
+  await page.getByRole('button', { name: 'Додати площу' }).click();
   const thirdMeasurementRow = page.getByRole('article').nth(2);
-  await activateAndDrawEllipse(
+  await activateAndDrawMeasurement(
     thirdMeasurementRow,
     viewerFrame,
     activeViewport,
+    'EllipticalROI',
     { x: 0.3, y: 0.56 },
     { x: 0.4, y: 0.66 }
   );
@@ -513,7 +520,8 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
 
   await expect(page.getByRole('article')).toHaveCount(3);
   await expect(page.getByRole('article').getByText('Готово')).toHaveCount(3);
-  await expect(page.locator('.scoring-total output')).toHaveText(expectedTotal);
+  await expect(page.locator('[data-total-kind="area"] output')).toHaveText(expectedTotal);
+  await expect(page.locator('[data-total-kind="length"] output')).toHaveText('—');
   expect(
     await page.locator('.measurement-row').evaluateAll(rows =>
       rows.map(row => {
@@ -540,6 +548,109 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     { titleOverflows: false, valueLines: 1 },
   ]);
 
+  await page.getByRole('button', { name: 'Додати довжину' }).click();
+  const lengthRow = page.getByRole('article').nth(3);
+  await expect(lengthRow.getByRole('heading', { name: 'Довжина' })).toBeVisible();
+  await activateAndDrawMeasurement(
+    lengthRow,
+    viewerFrame,
+    activeViewport,
+    'Length',
+    { x: 0.36, y: 0.7 },
+    { x: 0.58, y: 0.7 }
+  );
+
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          return bridgeWindow.__spsoftBridgeMessages.find(
+            message =>
+              message.origin === 'http://localhost:3000' &&
+              message.data?.type === 'MEASUREMENT_ADDED' &&
+              (message.data.payload?.measurement as { kind?: unknown } | undefined)?.kind ===
+                'length'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toMatchObject({
+      data: {
+        payload: {
+          measurement: {
+            kind: 'length',
+            value: expect.any(Number),
+            unit: 'mm',
+            rawUnit: 'mm',
+          },
+        },
+      },
+    });
+
+  const lengthValue = await lengthRow.locator('output').textContent();
+  await expect(page.locator('[data-total-kind="area"] output')).toHaveText(expectedTotal);
+  await expect(page.locator('[data-total-kind="length"] output')).toHaveText(lengthValue ?? '');
+
+  const lengthAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    return cornerstoneWindow.cornerstoneTools?.annotation.state
+      .getAllAnnotations()
+      .find(annotation => annotation.metadata?.toolName === 'Length')?.annotationUID;
+  });
+
+  if (!lengthAnnotationId) {
+    throw new Error('Could not resolve the correlated Length annotation.');
+  }
+
+  await lengthRow.getByRole('button', { name: 'Показати вимірювання 4 у Viewer' }).click();
+  await expect
+    .poll(() =>
+      viewerFrame.locator('body').evaluate(() => {
+        const bridgeWindow = window as Window & {
+          __spsoftBridgeMessages: CapturedBridgeMessage[];
+        };
+        return bridgeWindow.__spsoftBridgeMessages.filter(
+          message =>
+            message.origin === 'http://localhost:5173' && message.data?.type === 'FOCUS_MEASUREMENT'
+        ).length;
+      })
+    )
+    .toBe(2);
+
+  const focusedLengthAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+    return bridgeWindow.__spsoftBridgeMessages
+      .filter(
+        message =>
+          message.origin === 'http://localhost:5173' && message.data?.type === 'FOCUS_MEASUREMENT'
+      )
+      .at(-1)?.data.payload?.annotationId;
+  });
+  expect(focusedLengthAnnotationId).toBe(lengthAnnotationId);
+
+  await lengthRow.getByRole('button', { name: 'Видалити' }).click();
+  await expect(page.getByRole('article')).toHaveCount(3);
+  await expect(page.locator('[data-total-kind="length"] output')).toHaveText('—');
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return (
+            cornerstoneWindow.cornerstoneTools?.annotation.state
+              .getAllAnnotations()
+              .filter(annotation => annotation.metadata?.toolName === 'Length').length ?? 0
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(0);
+
   await expect
     .poll(
       () =>
@@ -563,7 +674,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     ).length;
   });
 
-  expect(correlatedMessageCount).toBe(3);
+  expect(correlatedMessageCount).toBe(4);
 
   await thirdMeasurementRow.getByRole('button', { name: 'Видалити' }).click();
   await expect(page.getByRole('article')).toHaveCount(2);
@@ -594,7 +705,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
         ).length;
       })
     )
-    .toBe(1);
+    .toBe(2);
   await expect
     .poll(() =>
       page.evaluate(() => {
@@ -608,7 +719,7 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
         ).length;
       })
     )
-    .toBe(1);
+    .toBe(2);
 
   const viewerDeletionAnnotationId = await viewerFrame.locator('body').evaluate(() => {
     const cornerstoneWindow = window as CornerstoneWindow;
@@ -654,7 +765,9 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   const remainingMeasurementValue = await page
     .locator('.measurement-row--ready .measurement-row__value')
     .textContent();
-  await expect(page.locator('.scoring-total output')).toHaveText(remainingMeasurementValue ?? '');
+  await expect(page.locator('[data-total-kind="area"] output')).toHaveText(
+    remainingMeasurementValue ?? ''
+  );
   await expect
     .poll(
       () =>
@@ -748,7 +861,8 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await expect(measurementRow.getByText('Очікує')).toBeVisible();
   await expect(measurementRow.locator('output')).toHaveText('—');
   await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(2);
-  await expect(page.locator('.scoring-total output')).toHaveText('—');
+  await expect(page.locator('[data-total-kind="area"] output')).toHaveText('—');
+  await expect(page.locator('[data-total-kind="length"] output')).toHaveText('—');
 
   await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
     timeout: 180_000,
@@ -811,7 +925,7 @@ test('host queues early activation and ignores malformed messages from the Viewe
   });
   await page.goto('/', { waitUntil: 'domcontentloaded' });
 
-  const addMeasurementButton = page.getByRole('button', { name: 'Додати вимірювання' });
+  const addMeasurementButton = page.getByRole('button', { name: 'Додати площу' });
   await expect(addMeasurementButton).toBeEnabled();
   await addMeasurementButton.click();
 

@@ -141,7 +141,10 @@ class FakeBridgeWindow implements BridgeWindow {
   }
 }
 
-function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean } = {}) {
+function createHarness({
+  supportsEllipse = true,
+  supportsLength = true,
+}: { supportsEllipse?: boolean; supportsLength?: boolean } = {}) {
   const bridgeWindow = new FakeBridgeWindow();
   const measurementService = new FakeMeasurementService();
   const viewportGridService = new FakeViewportGridService();
@@ -171,7 +174,9 @@ function createHarness({ supportsEllipse = true }: { supportsEllipse?: boolean }
       viewports: { size: 1 },
     };
     toolGroupService.toolGroup = {
-      hasTool: toolName => supportsEllipse && toolName === 'EllipticalROI',
+      hasTool: toolName =>
+        (supportsEllipse && toolName === 'EllipticalROI') ||
+        (supportsLength && toolName === 'Length'),
     };
     viewportGridService.emit(viewportGridService.EVENTS.VIEWPORTS_READY!);
   };
@@ -217,7 +222,7 @@ describe('ViewerBridgeController handshake', () => {
       messageId: 'ready-message-1',
       payload: {
         viewerInstanceId: 'viewer-session-1',
-        supportedTools: ['EllipticalROI'],
+        supportedTools: ['EllipticalROI', 'Length'],
         capabilities: {
           measurementDeletion: true,
           measurementFocus: true,
@@ -227,8 +232,8 @@ describe('ViewerBridgeController handshake', () => {
     });
   });
 
-  it('announces an empty supported tool list when EllipticalROI is unavailable', () => {
-    const { bridgeWindow, controller, makeReady } = createHarness({ supportsEllipse: false });
+  it('announces only the tools available in the active OHIF tool group', () => {
+    const { bridgeWindow, controller, makeReady } = createHarness({ supportsLength: false });
 
     controller.enterMode();
     makeReady();
@@ -239,7 +244,7 @@ describe('ViewerBridgeController handshake', () => {
       throw new Error('Expected a VIEWER_READY message.');
     }
 
-    expect(message.payload.supportedTools).toEqual([]);
+    expect(message.payload.supportedTools).toEqual(['EllipticalROI']);
   });
 
   it('waits when OHIF enters the mode before the viewport service is initialized', () => {
@@ -359,6 +364,112 @@ describe('ViewerBridgeController measurement correlation', () => {
     expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
       toolName: 'Pan',
     });
+  });
+
+  it('sends a valid armed Length measurement and returns to Pan', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady, measurementService } =
+      createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-length',
+          activationId: 'activation-length',
+          toolName: 'Length',
+        },
+        'activate-length'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-length',
+        toolName: 'Length',
+        data: { target: { length: 18.5, unit: 'mm' } },
+      },
+    });
+
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
+        payload: {
+          viewerInstanceId: 'viewer-session-1',
+          rowId: 'row-length',
+          activationId: 'activation-length',
+          annotationId: 'annotation-length',
+          measurement: {
+            kind: 'length',
+            value: 18.5,
+            unit: 'mm',
+            rawUnit: 'mm',
+          },
+        },
+      })
+    );
+    expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
+      toolName: 'Pan',
+    });
+  });
+
+  it('publishes changed Length updates without accepting a different measurement kind', () => {
+    const { bridgeWindow, controller, makeReady, measurementService } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-length',
+          activationId: 'activation-length',
+          toolName: 'Length',
+        },
+        'activate-length'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-length',
+        toolName: 'Length',
+        data: { target: { length: 18.5, unit: 'mm' } },
+      },
+    });
+
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'annotation-length',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 100, areaUnit: 'mm²' } },
+      },
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_UPDATED!, {
+      measurement: {
+        uid: 'annotation-length',
+        toolName: 'Length',
+        data: { target: { length: 22.25, unit: 'mm' } },
+      },
+    });
+
+    expect(bridgeWindow.postedMessages).toHaveLength(3);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[2]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED,
+        payload: expect.objectContaining({
+          annotationId: 'annotation-length',
+          measurement: {
+            kind: 'length',
+            value: 22.25,
+            unit: 'mm',
+            rawUnit: 'mm',
+          },
+        }),
+      })
+    );
   });
 
   it('ignores measurements until one matches the armed EllipticalROI operation', () => {

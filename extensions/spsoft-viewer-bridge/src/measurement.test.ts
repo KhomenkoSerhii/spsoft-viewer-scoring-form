@@ -1,10 +1,10 @@
 import {
-  extractEllipticalRoiAnnotationId,
-  extractEllipticalRoiMeasurement,
   extractRemovedAnnotationId,
+  extractSupportedMeasurement,
+  extractSupportedMeasurementAnnotationId,
 } from './measurement';
 
-describe('extractEllipticalRoiMeasurement', () => {
+describe('extractSupportedMeasurement', () => {
   it('identifies an ellipse before its cached statistics are ready', () => {
     const event = {
       measurement: {
@@ -14,13 +14,15 @@ describe('extractEllipticalRoiMeasurement', () => {
       },
     };
 
-    expect(extractEllipticalRoiAnnotationId(event)).toBe('annotation-pending');
-    expect(extractEllipticalRoiMeasurement(event)).toBeNull();
+    expect(extractSupportedMeasurementAnnotationId(event, 'EllipticalROI')).toBe(
+      'annotation-pending'
+    );
+    expect(extractSupportedMeasurement(event, 'EllipticalROI')).toBeNull();
   });
 
   it('extracts and normalizes area from the real OHIF measurement shape', () => {
     expect(
-      extractEllipticalRoiMeasurement({
+      extractSupportedMeasurement({
         source: { name: 'Cornerstone3DTools' },
         measurement: {
           uid: 'annotation-1',
@@ -47,7 +49,7 @@ describe('extractEllipticalRoiMeasurement', () => {
 
   it('uses the first complete target when cached stats contain incomplete entries', () => {
     expect(
-      extractEllipticalRoiMeasurement({
+      extractSupportedMeasurement({
         measurement: {
           uid: 'annotation-2',
           toolName: 'EllipticalROI',
@@ -67,6 +69,48 @@ describe('extractEllipticalRoiMeasurement', () => {
         calibrationType: 'USER',
       },
     });
+  });
+
+  it('extracts and normalizes length from the real OHIF measurement shape', () => {
+    expect(
+      extractSupportedMeasurement(
+        {
+          source: { name: 'Cornerstone3DTools' },
+          measurement: {
+            uid: 'length-annotation',
+            toolName: 'Length',
+            data: {
+              'imageId:wadors:study/series/instance': {
+                length: 18.5,
+                unit: 'mm',
+              },
+            },
+          },
+        },
+        'Length'
+      )
+    ).toEqual({
+      annotationId: 'length-annotation',
+      measurement: {
+        kind: 'length',
+        value: 18.5,
+        unit: 'mm',
+        rawUnit: 'mm',
+      },
+    });
+  });
+
+  it('does not accept a supported measurement for a differently armed tool', () => {
+    const event = {
+      measurement: {
+        uid: 'length-annotation',
+        toolName: 'Length',
+        data: { target: { length: 18.5, unit: 'mm' } },
+      },
+    };
+
+    expect(extractSupportedMeasurementAnnotationId(event, 'EllipticalROI')).toBeNull();
+    expect(extractSupportedMeasurement(event, 'EllipticalROI')).toBeNull();
   });
 
   it.each([
@@ -89,7 +133,7 @@ describe('extractEllipticalRoiMeasurement', () => {
       },
     },
   ])('ignores unrelated or malformed payload %#', event => {
-    expect(extractEllipticalRoiMeasurement(event)).toBeNull();
+    expect(extractSupportedMeasurement(event)).toBeNull();
   });
 });
 

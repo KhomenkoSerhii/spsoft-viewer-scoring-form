@@ -2,6 +2,7 @@ import {
   BRIDGE_MESSAGE_TYPES,
   createBridgeMessage,
   isViewerToHostMessage,
+  measurementMatchesTool,
   parseBridgeMessage,
   type MeasurementAddedPayload,
   type MeasurementRemovedPayload,
@@ -70,6 +71,7 @@ export class HostBridgeController {
   private readonly viewerOrigin: string;
   private activeRequest: ActivationRequest | null = null;
   private readonly rowIdsByAnnotationId = new Map<string, string>();
+  private readonly toolNamesByAnnotationId = new Map<string, SupportedToolName>();
   private readonly acceptedMessageIds = new Set<string>();
   private readonly pendingRemovalAnnotationIds = new Set<string>();
   private installed = false;
@@ -214,6 +216,7 @@ export class HostBridgeController {
 
     this.viewerSession = null;
     this.rowIdsByAnnotationId.clear();
+    this.toolNamesByAnnotationId.clear();
     this.acceptedMessageIds.clear();
     this.pendingRemovalAnnotationIds.clear();
     this.callbacks.onViewerLoading();
@@ -228,6 +231,7 @@ export class HostBridgeController {
     this.pendingRequest = null;
     this.viewerSession = null;
     this.rowIdsByAnnotationId.clear();
+    this.toolNamesByAnnotationId.clear();
     this.acceptedMessageIds.clear();
     this.pendingRemovalAnnotationIds.clear();
 
@@ -275,6 +279,7 @@ export class HostBridgeController {
 
     if (previousViewerInstanceId && previousViewerInstanceId !== message.payload.viewerInstanceId) {
       this.rowIdsByAnnotationId.clear();
+      this.toolNamesByAnnotationId.clear();
       this.acceptedMessageIds.clear();
       this.pendingRemovalAnnotationIds.clear();
     }
@@ -303,22 +308,28 @@ export class HostBridgeController {
       this.rowIdsByAnnotationId.has(payload.annotationId) ||
       payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
       payload.rowId !== activeRequest.rowId ||
-      payload.activationId !== activeRequest.activationId
+      payload.activationId !== activeRequest.activationId ||
+      !measurementMatchesTool(payload.measurement, activeRequest.toolName)
     ) {
       return;
     }
 
     this.rememberAcceptedMessageId(messageId);
     this.rowIdsByAnnotationId.set(payload.annotationId, payload.rowId);
+    this.toolNamesByAnnotationId.set(payload.annotationId, activeRequest.toolName);
     this.activeRequest = null;
     this.callbacks.onMeasurementAdded(payload);
   }
 
   private acceptMeasurementUpdate(messageId: string, payload: MeasurementUpdatedPayload): void {
+    const toolName = this.toolNamesByAnnotationId.get(payload.annotationId);
+
     if (
       this.acceptedMessageIds.has(messageId) ||
       payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
-      this.rowIdsByAnnotationId.get(payload.annotationId) !== payload.rowId
+      this.rowIdsByAnnotationId.get(payload.annotationId) !== payload.rowId ||
+      !toolName ||
+      !measurementMatchesTool(payload.measurement, toolName)
     ) {
       return;
     }
@@ -338,6 +349,7 @@ export class HostBridgeController {
 
     this.rememberAcceptedMessageId(messageId);
     this.rowIdsByAnnotationId.delete(payload.annotationId);
+    this.toolNamesByAnnotationId.delete(payload.annotationId);
     this.pendingRemovalAnnotationIds.delete(payload.annotationId);
     this.callbacks.onMeasurementRemoved(payload);
   }

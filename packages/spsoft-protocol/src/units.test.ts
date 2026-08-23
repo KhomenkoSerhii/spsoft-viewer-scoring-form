@@ -1,4 +1,11 @@
-import { createAreaMeasurement, getAreaAggregationKey, normalizeAreaUnit } from './units';
+import {
+  createAreaMeasurement,
+  createLengthMeasurement,
+  getAreaAggregationKey,
+  getLengthAggregationKey,
+  normalizeAreaUnit,
+  normalizeLengthUnit,
+} from './units';
 
 describe('normalizeAreaUnit', () => {
   it.each([
@@ -62,6 +69,54 @@ describe('getAreaAggregationKey', () => {
   it('normalizes whitespace and casing within the same unknown unit', () => {
     const firstKey = getAreaAggregationKey(createAreaMeasurement(1, 'M²  CUSTOM'));
     const secondKey = getAreaAggregationKey(createAreaMeasurement(1, '  m² custom  '));
+
+    expect(firstKey).toBe(secondKey);
+  });
+});
+
+describe('normalizeLengthUnit', () => {
+  it.each([
+    ['mm', 'mm', undefined],
+    ['CM', 'cm', undefined],
+    ['px USER', 'px', 'USER'],
+    ['in CUSTOM', 'unknown', 'CUSTOM'],
+  ] as const)('normalizes %s to %s', (rawUnit, unit, calibrationType) => {
+    expect(normalizeLengthUnit(rawUnit)).toEqual({
+      unit,
+      rawUnit,
+      ...(calibrationType ? { calibrationType } : {}),
+    });
+  });
+});
+
+describe('createLengthMeasurement', () => {
+  it('creates a consistent measurement from an OHIF raw unit', () => {
+    expect(createLengthMeasurement(18.5, 'mm')).toEqual({
+      kind: 'length',
+      value: 18.5,
+      unit: 'mm',
+      rawUnit: 'mm',
+    });
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('rejects invalid length value %s', value => {
+    expect(() => createLengthMeasurement(value, 'mm')).toThrow(RangeError);
+  });
+
+  it('rejects an empty raw unit', () => {
+    expect(() => createLengthMeasurement(1, ' ')).toThrow(TypeError);
+  });
+});
+
+describe('getLengthAggregationKey', () => {
+  it('keeps physical and pixel lengths in separate buckets', () => {
+    expect(getLengthAggregationKey(createLengthMeasurement(1, 'mm'))).toBe('length:mm');
+    expect(getLengthAggregationKey(createLengthMeasurement(1, 'px'))).toBe('length:px');
+  });
+
+  it('normalizes whitespace and casing for unknown units', () => {
+    const firstKey = getLengthAggregationKey(createLengthMeasurement(1, 'IN  CUSTOM'));
+    const secondKey = getLengthAggregationKey(createLengthMeasurement(2, '  in custom  '));
 
     expect(firstKey).toBe(secondKey);
   });

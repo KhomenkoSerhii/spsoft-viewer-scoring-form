@@ -195,13 +195,19 @@ h1 {
   line-height: 1.55;
 }
 
+.add-measurement-group {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-top: 24px;
+}
+
 .add-measurement {
   display: flex;
   width: 100%;
   align-items: center;
   justify-content: center;
   gap: 8px;
-  margin-top: 24px;
   padding: 13px 16px;
   border: 1px solid #0f6b62;
   border-radius: 5px;
@@ -215,6 +221,17 @@ h1 {
     transform 150ms ease,
     background 150ms ease,
     box-shadow 150ms ease;
+}
+
+.add-measurement--secondary {
+  border-color: #8b9694;
+  color: #24413e;
+  background: #e7eeeb;
+  box-shadow: none;
+}
+
+.add-measurement--secondary:hover:not(:disabled) {
+  color: #f7fbfa;
 }
 
 .add-measurement:hover:not(:disabled) {
@@ -531,13 +548,19 @@ h1 {
   line-height: 1.5;
 }
 
+.scoring-totals {
+  display: grid;
+  gap: 12px;
+  padding-top: 16px;
+  border-top: 2px solid var(--ink);
+}
+
 .scoring-total {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 20px;
-  padding-top: 20px;
-  border-top: 2px solid var(--ink);
+  min-height: 28px;
   color: var(--ink);
   font-size: 14px;
   font-weight: 800;
@@ -590,5 +613,9 @@ h1 {
   .scoring-panel {
     padding-right: 18px;
     padding-left: 18px;
+  }
+
+  .add-measurement-group {
+    grid-template-columns: 1fr;
   }
 }

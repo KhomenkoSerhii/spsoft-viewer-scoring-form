@@ -1,10 +1,11 @@
-import type {
-  AreaMeasurement,
-  MeasurementAddedPayload,
-  MeasurementRemovedPayload,
-  MeasurementUpdatedPayload,
-  SupportedToolName,
-  ViewerReadyPayload,
+import {
+  measurementMatchesTool,
+  type Measurement,
+  type MeasurementAddedPayload,
+  type MeasurementRemovedPayload,
+  type MeasurementUpdatedPayload,
+  type SupportedToolName,
+  type ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
 
 export type MeasurementRowStatus =
@@ -20,8 +21,9 @@ export interface MeasurementRow {
   annotationId?: string;
   error?: 'unsupported' | 'bridge-error';
   id: string;
-  measurement?: AreaMeasurement;
+  measurement?: Measurement;
   status: MeasurementRowStatus;
+  toolName: SupportedToolName;
 }
 
 export interface ScoringState {
@@ -37,7 +39,7 @@ export interface ScoringState {
 }
 
 export type ScoringAction =
-  | { type: 'rowAdded'; rowId: string }
+  | { type: 'rowAdded'; rowId: string; toolName: SupportedToolName }
   | {
       type: 'activationRequested';
       activationId: string;
@@ -74,7 +76,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
     case 'rowAdded':
       return {
         ...state,
-        rows: [...state.rows, { id: action.rowId, status: 'waiting' }],
+        rows: [...state.rows, { id: action.rowId, status: 'waiting', toolName: action.toolName }],
       };
 
     case 'viewerLoading':
@@ -114,6 +116,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           return {
             id: row.id,
             status: 'error',
+            toolName: row.toolName,
             error: action.outcome === 'unsupported' ? 'unsupported' : 'bridge-error',
           };
         }
@@ -122,6 +125,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           id: row.id,
           status: action.outcome === 'queued' ? 'queued' : 'drawing',
           activationId: action.activationId,
+          toolName: row.toolName,
         };
       });
     }
@@ -133,6 +137,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       return updateMatchingActivation(state, action, row => ({
         id: row.id,
         status: 'error',
+        toolName: row.toolName,
         error: action.reason === 'unsupported' ? 'unsupported' : 'bridge-error',
       }));
 
@@ -143,12 +148,16 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           rowId: action.payload.rowId,
           activationId: action.payload.activationId,
         },
-        row => ({
-          id: row.id,
-          status: 'ready',
-          annotationId: action.payload.annotationId,
-          measurement: action.payload.measurement,
-        })
+        row =>
+          measurementMatchesTool(action.payload.measurement, row.toolName)
+            ? {
+                id: row.id,
+                status: 'ready',
+                annotationId: action.payload.annotationId,
+                measurement: action.payload.measurement,
+                toolName: row.toolName,
+              }
+            : row
       );
 
     case 'measurementUpdated': {
@@ -160,7 +169,9 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       }
 
       return updateRow(state, action.payload.rowId, row =>
-        row.status === 'ready' && row.annotationId === action.payload.annotationId
+        row.status === 'ready' &&
+        row.annotationId === action.payload.annotationId &&
+        measurementMatchesTool(action.payload.measurement, row.toolName)
           ? { ...row, measurement: action.payload.measurement }
           : row
       );
@@ -198,6 +209,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       return updateRow(state, row.id, currentRow => ({
         id: currentRow.id,
         status: 'waiting',
+        toolName: currentRow.toolName,
       }));
     }
 
@@ -206,6 +218,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       return updateMatchingActivation(state, action, row => ({
         id: row.id,
         status: 'waiting',
+        toolName: row.toolName,
       }));
   }
 }
@@ -218,7 +231,7 @@ function resetCompletedRows(rows: MeasurementRow[]): MeasurementRow[] {
     }
 
     changed = true;
-    return { id: row.id, status: 'waiting' } satisfies MeasurementRow;
+    return { id: row.id, status: 'waiting', toolName: row.toolName } satisfies MeasurementRow;
   });
 
   return changed ? resetRows : rows;

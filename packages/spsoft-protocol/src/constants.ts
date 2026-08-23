@@ -12,8 +12,9 @@ export const BRIDGE_MESSAGE_TYPES = {
   MEASUREMENT_REMOVED: 'MEASUREMENT_REMOVED',
 } as const;
 
-export const SUPPORTED_TOOLS = ['EllipticalROI'] as const;
+export const SUPPORTED_TOOLS = ['EllipticalROI', 'Length'] as const;
 
 export const AREA_UNITS = ['mm2', 'cm2', 'px2', 'unknown'] as const;
+export const LENGTH_UNITS = ['mm', 'cm', 'px', 'unknown'] as const;
 
 export const DEACTIVATION_REASONS = ['user-cancelled', 'superseded', 'host-unmounted'] as const;

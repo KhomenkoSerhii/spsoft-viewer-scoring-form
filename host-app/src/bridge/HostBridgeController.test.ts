@@ -4,6 +4,8 @@ import {
   BRIDGE_VERSION,
   createBridgeMessage,
   parseBridgeMessage,
+  type Measurement,
+  type SupportedToolName,
 } from '@spsoft/viewer-protocol';
 
 import {
@@ -83,7 +85,7 @@ function createHarness() {
     measurementDeletion?: boolean;
     measurementFocus?: boolean;
     source?: ViewerMessageWindow;
-    supportedTools?: readonly ['EllipticalROI'] | readonly [];
+    supportedTools?: readonly SupportedToolName[];
     viewerInstanceId?: string;
   } = {}) => {
     hostWindow.dispatch(
@@ -105,12 +107,19 @@ function createHarness() {
     activationId = 'activation-1',
     annotationId = 'annotation-1',
     messageId = 'measurement-message',
+    measurement = {
+      kind: 'area',
+      value: 42.75,
+      unit: 'mm2',
+      rawUnit: 'mm²',
+    } as const,
     rowId = 'row-1',
     viewerInstanceId = 'viewer-1',
   }: {
     activationId?: string;
     annotationId?: string;
     messageId?: string;
+    measurement?: Measurement;
     rowId?: string;
     viewerInstanceId?: string;
   } = {}) => {
@@ -119,12 +128,7 @@ function createHarness() {
       rowId,
       activationId,
       annotationId,
-      measurement: {
-        kind: 'area' as const,
-        value: 42.75,
-        unit: 'mm2' as const,
-        rawUnit: 'mm²',
-      },
+      measurement,
     };
     hostWindow.dispatch(
       createBridgeMessage(BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED, payload, messageId),
@@ -137,12 +141,14 @@ function createHarness() {
   const dispatchMeasurementUpdate = ({
     annotationId = 'annotation-1',
     messageId = 'measurement-update-message',
+    measurement,
     rowId = 'row-1',
     value = 50.25,
     viewerInstanceId = 'viewer-1',
   }: {
     annotationId?: string;
     messageId?: string;
+    measurement?: Measurement;
     rowId?: string;
     value?: number;
     viewerInstanceId?: string;
@@ -151,7 +157,7 @@ function createHarness() {
       viewerInstanceId,
       rowId,
       annotationId,
-      measurement: {
+      measurement: measurement ?? {
         kind: 'area' as const,
         value,
         unit: 'mm2' as const,
@@ -397,6 +403,57 @@ describe('HostBridgeController', () => {
     expect(callbacks.onMeasurementAdded).toHaveBeenCalledTimes(1);
     expect(callbacks.onMeasurementAdded).toHaveBeenCalledWith(payload);
     expect(controller.activate({ ...activation, activationId: 'activation-2' })).toBe('sent');
+  });
+
+  it('accepts Length only for a Length activation and keeps its updates type-safe', () => {
+    const { announceReady, callbacks, controller, dispatchMeasurement, dispatchMeasurementUpdate } =
+      createHarness();
+    const activation: ActivationRequest = {
+      rowId: 'row-length',
+      activationId: 'activation-length',
+      toolName: 'Length',
+    };
+    const lengthMeasurement = {
+      kind: 'length' as const,
+      value: 18.5,
+      unit: 'mm' as const,
+      rawUnit: 'mm',
+    };
+
+    controller.install();
+    announceReady({ supportedTools: ['EllipticalROI', 'Length'] });
+    expect(controller.activate(activation)).toBe('sent');
+
+    dispatchMeasurement({
+      rowId: activation.rowId,
+      activationId: activation.activationId,
+      annotationId: 'annotation-length',
+    });
+    expect(callbacks.onMeasurementAdded).not.toHaveBeenCalled();
+
+    const addedPayload = dispatchMeasurement({
+      rowId: activation.rowId,
+      activationId: activation.activationId,
+      annotationId: 'annotation-length',
+      messageId: 'measurement-length',
+      measurement: lengthMeasurement,
+    });
+    expect(callbacks.onMeasurementAdded).toHaveBeenCalledWith(addedPayload);
+
+    dispatchMeasurementUpdate({
+      rowId: activation.rowId,
+      annotationId: 'annotation-length',
+      messageId: 'measurement-length-wrong-update',
+    });
+    expect(callbacks.onMeasurementUpdated).not.toHaveBeenCalled();
+
+    const updatedPayload = dispatchMeasurementUpdate({
+      rowId: activation.rowId,
+      annotationId: 'annotation-length',
+      messageId: 'measurement-length-update',
+      measurement: { ...lengthMeasurement, value: 22.25 },
+    });
+    expect(callbacks.onMeasurementUpdated).toHaveBeenCalledWith(updatedPayload);
   });
 
   it('ignores measurements with stale session or correlation identifiers', () => {
