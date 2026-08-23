@@ -1,6 +1,12 @@
 import { initialScoringState, scoringReducer, type ScoringState } from './state';
 import { calculateAreaTotals } from './totals';
 
+const viewerCapabilities = {
+  measurementDeletion: true,
+  measurementFocus: true,
+  measurementUpdates: true,
+} as const;
+
 describe('scoringReducer', () => {
   it('adds any number of independent waiting rows', () => {
     const withFirstRow = scoringReducer(initialScoringState, {
@@ -153,6 +159,7 @@ describe('scoringReducer', () => {
   it('updates a completed correlated measurement in the current Viewer session', () => {
     const readyState: ScoringState = {
       connection: {
+        capabilities: viewerCapabilities,
         status: 'ready',
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
@@ -194,6 +201,7 @@ describe('scoringReducer', () => {
   it('removes a host-deleted row only after the Viewer confirms deletion', () => {
     const readyState: ScoringState = {
       connection: {
+        capabilities: viewerCapabilities,
         status: 'ready',
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
@@ -229,6 +237,7 @@ describe('scoringReducer', () => {
   it('clears a row when its annotation is deleted directly in the Viewer', () => {
     const readyState: ScoringState = {
       connection: {
+        capabilities: viewerCapabilities,
         status: 'ready',
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
@@ -269,7 +278,11 @@ describe('scoringReducer', () => {
       payload: {
         viewerInstanceId: 'viewer-1',
         supportedTools: [],
-        capabilities: { measurementDeletion: false, measurementUpdates: false },
+        capabilities: {
+          measurementDeletion: false,
+          measurementFocus: false,
+          measurementUpdates: false,
+        },
       },
     });
     const withRow = scoringReducer(connected, { type: 'rowAdded', rowId: 'row-1' });
@@ -281,6 +294,11 @@ describe('scoringReducer', () => {
     });
 
     expect(connected.connection).toEqual({
+      capabilities: {
+        measurementDeletion: false,
+        measurementFocus: false,
+        measurementUpdates: false,
+      },
       status: 'ready',
       viewerInstanceId: 'viewer-1',
       supportedTools: [],
@@ -340,6 +358,7 @@ describe('scoringReducer', () => {
   it('clears completed bindings while the viewer reloads', () => {
     const readyState = {
       connection: {
+        capabilities: viewerCapabilities,
         status: 'ready' as const,
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI' as const],
@@ -370,7 +389,11 @@ describe('scoringReducer', () => {
       payload: {
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementDeletion: false, measurementUpdates: false },
+        capabilities: {
+          measurementDeletion: false,
+          measurementFocus: false,
+          measurementUpdates: false,
+        },
       },
     });
     const stateWithCompletedRow = {
@@ -390,7 +413,11 @@ describe('scoringReducer', () => {
       payload: {
         viewerInstanceId: 'viewer-2',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementDeletion: false, measurementUpdates: false },
+        capabilities: {
+          measurementDeletion: false,
+          measurementFocus: false,
+          measurementUpdates: false,
+        },
       },
     });
 

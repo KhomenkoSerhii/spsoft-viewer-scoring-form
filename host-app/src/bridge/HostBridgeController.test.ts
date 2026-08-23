@@ -1,5 +1,7 @@
 import {
+  BRIDGE_CHANNEL,
   BRIDGE_MESSAGE_TYPES,
+  BRIDGE_VERSION,
   createBridgeMessage,
   parseBridgeMessage,
 } from '@spsoft/viewer-protocol';
@@ -73,11 +75,13 @@ function createHarness() {
   };
   const announceReady = ({
     measurementDeletion = true,
+    measurementFocus = true,
     source = viewerWindow,
     supportedTools = ['EllipticalROI'] as const,
     viewerInstanceId = 'viewer-1',
   }: {
     measurementDeletion?: boolean;
+    measurementFocus?: boolean;
     source?: ViewerMessageWindow;
     supportedTools?: readonly ['EllipticalROI'] | readonly [];
     viewerInstanceId?: string;
@@ -88,7 +92,7 @@ function createHarness() {
         {
           viewerInstanceId,
           supportedTools: [...supportedTools],
-          capabilities: { measurementDeletion, measurementUpdates: true },
+          capabilities: { measurementDeletion, measurementFocus, measurementUpdates: true },
         },
         `ready-${viewerInstanceId}`
       ),
@@ -206,7 +210,11 @@ describe('HostBridgeController', () => {
         {
           viewerInstanceId: 'attacker',
           supportedTools: ['EllipticalROI'],
-          capabilities: { measurementDeletion: false, measurementUpdates: false },
+          capabilities: {
+            measurementDeletion: false,
+            measurementFocus: false,
+            measurementUpdates: false,
+          },
         },
         'attacker-message'
       ),
@@ -220,6 +228,38 @@ describe('HostBridgeController', () => {
     expect(callbacks.onViewerReady).toHaveBeenCalledWith(
       expect.objectContaining({ viewerInstanceId: 'viewer-1' })
     );
+  });
+
+  it('keeps the handshake usable when an older Viewer omits the focus capability', () => {
+    const { activation, callbacks, controller, hostWindow, viewerWindow } = createHarness();
+    controller.install();
+
+    hostWindow.dispatch(
+      {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        messageId: 'ready-without-focus',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          supportedTools: ['EllipticalROI'],
+          capabilities: {
+            measurementDeletion: true,
+            measurementUpdates: true,
+          },
+        },
+      },
+      'http://localhost:3000',
+      viewerWindow
+    );
+
+    expect(callbacks.onViewerReady).toHaveBeenCalledWith(
+      expect.objectContaining({
+        capabilities: expect.objectContaining({ measurementFocus: false }),
+      })
+    );
+    expect(controller.activate(activation)).toBe('sent');
+    expect(viewerWindow.postedMessages).toHaveLength(1);
   });
 
   it('queues activation before handshake and flushes it after VIEWER_READY', () => {
@@ -425,6 +465,54 @@ describe('HostBridgeController', () => {
 
     expect(callbacks.onMeasurementUpdated).toHaveBeenCalledTimes(1);
     expect(callbacks.onMeasurementUpdated).toHaveBeenCalledWith(payload);
+  });
+
+  it('focuses only a correlated measurement in a ready Viewer session', () => {
+    const { activation, announceReady, controller, dispatchMeasurement, viewerWindow } =
+      createHarness();
+    controller.install();
+
+    expect(controller.focusMeasurement({ rowId: 'row-1', annotationId: 'annotation-1' })).toBe(
+      'error'
+    );
+
+    announceReady();
+    controller.activate(activation);
+    dispatchMeasurement();
+
+    expect(controller.focusMeasurement({ rowId: 'other-row', annotationId: 'annotation-1' })).toBe(
+      'error'
+    );
+    expect(controller.focusMeasurement({ rowId: 'row-1', annotationId: 'annotation-1' })).toBe(
+      'sent'
+    );
+    expect(parseBridgeMessage(viewerWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+        payload: {
+          targetViewerInstanceId: 'viewer-1',
+          rowId: 'row-1',
+          annotationId: 'annotation-1',
+        },
+      })
+    );
+  });
+
+  it('does not focus while drawing or when the Viewer lacks the capability', () => {
+    const { activation, announceReady, controller, dispatchMeasurement } = createHarness();
+    controller.install();
+    announceReady({ measurementFocus: false });
+    controller.activate(activation);
+
+    expect(controller.focusMeasurement({ rowId: 'row-1', annotationId: 'annotation-1' })).toBe(
+      'busy'
+    );
+
+    dispatchMeasurement();
+
+    expect(controller.focusMeasurement({ rowId: 'row-1', annotationId: 'annotation-1' })).toBe(
+      'unsupported'
+    );
   });
 
   it('bounds duplicate tracking to the most recent message identifiers', () => {

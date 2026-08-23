@@ -36,8 +36,10 @@ interface BridgeMessage {
 ```
 
 `channel` prevents unrelated `message` traffic from reaching bridge logic. `version` gives the
-parser an explicit compatibility boundary. Version 1 includes the core flow and the additive live
-update and deletion messages. A future incompatible payload change would require a new version.
+parser an explicit compatibility boundary. Version 1 includes the core flow and the additive focus,
+live update, and deletion messages. An older Viewer may omit `capabilities.measurementFocus`; the
+parser normalizes that omission to `false`, while still rejecting a non-boolean value. A future
+incompatible payload change would require a new version.
 
 Each sender creates a fresh `messageId` with `crypto.randomUUID()`. The host remembers accepted
 Viewer message IDs for the current session and ignores duplicates.
@@ -46,9 +48,10 @@ Viewer message IDs for the current session and ignores duplicates.
 
 | Direction | Type | Payload | Purpose |
 | --- | --- | --- | --- |
-| Viewer to host | `VIEWER_READY` | `viewerInstanceId`, `supportedTools`, `capabilities.measurementUpdates`, `capabilities.measurementDeletion` | Announces a ready Viewer session and its supported behavior. |
+| Viewer to host | `VIEWER_READY` | `viewerInstanceId`, `supportedTools`, `capabilities.measurementUpdates`, `capabilities.measurementDeletion`, `capabilities.measurementFocus` | Announces a ready Viewer session and its supported behavior. |
 | Host to Viewer | `ACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `toolName` | Arms `EllipticalROI` for one form row. |
 | Host to Viewer | `DEACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `reason` | Cancels the matching activation and restores Pan. |
+| Host to Viewer | `FOCUS_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Selects a correlated annotation and navigates the Viewer to it. |
 | Host to Viewer | `REMOVE_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Removes one correlated OHIF measurement. |
 | Viewer to host | `MEASUREMENT_ADDED` | `viewerInstanceId`, `rowId`, `activationId`, `annotationId`, `measurement` | Completes the active row with a newly created annotation. |
 | Viewer to host | `MEASUREMENT_UPDATED` | `viewerInstanceId`, `rowId`, `annotationId`, `measurement` | Updates the value after an ellipse handle moves. |
@@ -145,6 +148,13 @@ with the last published value for that annotation and drops unchanged events. Th
 the bound row and derives new totals from reducer state. Its duplicate-message cache retains only a
 bounded window of recent identifiers, so a long editing session does not grow the set indefinitely.
 
+Clicking a completed form row sends `FOCUS_MEASUREMENT` only when the current Viewer advertised
+that capability and no drawing operation is armed. This guard prevents focus navigation from
+redirecting the active drawing tool to another image or slice before its annotation is completed.
+Both sides verify the stored annotation-to-row binding. The Viewer then runs OHIF's
+`jumpToMeasurementViewport` command with the corresponding MeasurementService entry. The command
+selects the annotation and navigates a compatible viewport to its image or slice.
+
 For form-initiated deletion, the host sends `REMOVE_MEASUREMENT` and marks the annotation as
 pending. It removes the form row only after OHIF emits removal and the Viewer returns
 `MEASUREMENT_REMOVED`. If deletion starts in OHIF, the same event clears the linked row and returns
@@ -215,7 +225,8 @@ consistent with the annotation still visible in OHIF.
 
 The focused Jest projects cover protocol parsing and units, bridge behavior, reducer transitions,
 and totals. Playwright exercises the two-origin flow with a real OHIF runtime, including early
-activation, live updates, deletion in both directions, malformed messages, and iframe reload.
+activation, focus navigation, live updates, deletion in both directions, malformed messages, and
+iframe reload.
 
 The assignment does not require tests for the full OHIF monorepo, so `yarn test:spsoft` runs only
 the added SPSoft packages and integration scenarios.

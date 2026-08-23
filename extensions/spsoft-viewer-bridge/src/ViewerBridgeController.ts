@@ -366,6 +366,26 @@ export class ViewerBridgeController {
       return;
     }
 
+    if (message.type === BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT) {
+      const { annotationId, rowId } = message.payload;
+
+      if (this.armedActivation || this.rowIdsByAnnotationId.get(annotationId) !== rowId) {
+        return;
+      }
+
+      const measurement = this.services.measurementService.getMeasurement(annotationId);
+
+      if (!measurement) {
+        return;
+      }
+
+      this.commandsManager.runCommand('jumpToMeasurementViewport', {
+        annotationUID: annotationId,
+        measurement,
+      });
+      return;
+    }
+
     if (
       this.armedActivation?.rowId !== message.payload.rowId ||
       this.armedActivation.activationId !== message.payload.activationId
@@ -432,7 +452,11 @@ export class ViewerBridgeController {
       {
         viewerInstanceId: this.viewerInstanceId,
         supportedTools,
-        capabilities: { measurementDeletion: true, measurementUpdates: true },
+        capabilities: {
+          measurementDeletion: true,
+          measurementFocus: true,
+          measurementUpdates: true,
+        },
       },
       this.createId()
     );

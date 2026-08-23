@@ -104,24 +104,29 @@ function EmptyMeasurements() {
 
 interface MeasurementRowItemProps {
   busy: boolean;
+  focusSupported: boolean;
   index: number;
   onActivate: (rowId: string) => void;
   onCancel: (row: MeasurementRow) => void;
   onDelete: (row: MeasurementRow) => void;
+  onFocus: (row: MeasurementRow) => void;
   row: MeasurementRow;
 }
 
 function MeasurementRowItem({
   busy,
+  focusSupported,
   index,
   onActivate,
   onCancel,
   onDelete,
+  onFocus,
   row,
 }: MeasurementRowItemProps) {
   const copy = statusCopy[row.status];
   const isActive = row.status === 'queued' || row.status === 'drawing';
   const canActivate = (row.status === 'waiting' || row.status === 'error') && !busy;
+  const canFocus = row.status === 'ready' && focusSupported && !busy;
   const measurementValue = row.measurement
     ? `${AREA_NUMBER_FORMATTER.format(row.measurement.value)} ${row.measurement.rawUnit}`
     : '—';
@@ -130,13 +135,24 @@ function MeasurementRowItem({
       ? 'Ellipse недоступний у поточному режимі'
       : row.error === 'bridge-error'
         ? 'Канал Viewer тимчасово недоступний'
-        : copy.description;
+        : canFocus
+          ? 'Клікніть рядок, щоб показати анотацію у Viewer'
+          : copy.description;
 
   return (
     <article
       className={`measurement-row measurement-row--${row.status}`}
       data-row-id={row.id}
     >
+      {canFocus ? (
+        <button
+          className="measurement-row__focus-target"
+          type="button"
+          aria-label={`Показати вимірювання ${index + 1} у Viewer`}
+          onClick={() => onFocus(row)}
+        />
+      ) : null}
+
       <div className="measurement-row__heading">
         <div>
           <span className="measurement-row__index">{String(index + 1).padStart(2, '0')}</span>
@@ -197,6 +213,7 @@ interface ScoringPanelProps {
   onAddRow: () => void;
   onCancel: (row: MeasurementRow) => void;
   onDelete: (row: MeasurementRow) => void;
+  onFocus: (row: MeasurementRow) => void;
   state: ScoringState;
 }
 
@@ -206,11 +223,14 @@ function ScoringPanel({
   onAddRow,
   onCancel,
   onDelete,
+  onFocus,
   state,
 }: ScoringPanelProps) {
   const connected = state.connection.status === 'ready';
   const ellipseSupported =
     state.connection.status === 'ready' && state.connection.supportedTools.includes(ELLIPSE_TOOL);
+  const focusSupported =
+    state.connection.status === 'ready' && state.connection.capabilities.measurementFocus;
   const connectionLabel = !connected
     ? 'Підключення до Viewer…'
     : ellipseSupported
@@ -263,9 +283,11 @@ function ScoringPanel({
               row={row}
               index={index}
               busy={busy && row.status !== 'queued' && row.status !== 'drawing'}
+              focusSupported={focusSupported}
               onActivate={onActivate}
               onCancel={onCancel}
               onDelete={onDelete}
+              onFocus={onFocus}
             />
           ))
         ) : (
@@ -390,6 +412,17 @@ export function App() {
     }
   }, []);
 
+  const handleFocus = useCallback((row: MeasurementRow) => {
+    if (!row.annotationId) {
+      return;
+    }
+
+    bridgeRef.current?.focusMeasurement({
+      rowId: row.id,
+      annotationId: row.annotationId,
+    });
+  }, []);
+
   return (
     <main className="workspace">
       <ViewerFrame
@@ -404,6 +437,7 @@ export function App() {
         onActivate={handleActivate}
         onCancel={handleCancel}
         onDelete={handleDelete}
+        onFocus={handleFocus}
       />
     </main>
   );

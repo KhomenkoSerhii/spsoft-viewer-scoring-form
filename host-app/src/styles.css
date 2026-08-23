@@ -224,6 +224,7 @@ h1 {
 }
 
 .add-measurement:focus-visible,
+.measurement-row__focus-target:focus-visible,
 .measurement-row__button:focus-visible {
   outline: 3px solid rgb(20 122 112 / 20%);
   outline-offset: 2px;
@@ -269,6 +270,29 @@ h1 {
   border-radius: 7px;
   background: rgb(251 250 247 / 90%);
   box-shadow: 0 7px 20px rgb(35 45 46 / 5%);
+  transition:
+    border-color 150ms ease,
+    box-shadow 150ms ease;
+}
+
+.measurement-row--ready:hover {
+  border-color: #8db4ad;
+  box-shadow: 0 9px 24px rgb(20 122 112 / 10%);
+}
+
+.measurement-row__focus-target {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  width: 100%;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+
+.measurement-row__focus-target:focus-visible {
+  outline-offset: -4px;
 }
 
 .measurement-row::before {
@@ -397,6 +421,8 @@ h1 {
 }
 
 .measurement-row__button {
+  position: relative;
+  z-index: 2;
   width: 100%;
   margin-top: 14px;
   padding: 9px 12px;

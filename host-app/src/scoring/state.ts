@@ -28,6 +28,7 @@ export interface ScoringState {
   connection:
     | { status: 'connecting' }
     | {
+        capabilities: ViewerReadyPayload['capabilities'];
         status: 'ready';
         supportedTools: SupportedToolName[];
         viewerInstanceId: string;
@@ -90,6 +91,7 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
       return {
         ...state,
         connection: {
+          capabilities: action.payload.capabilities,
           status: 'ready',
           viewerInstanceId: action.payload.viewerInstanceId,
           supportedTools: action.payload.supportedTools,

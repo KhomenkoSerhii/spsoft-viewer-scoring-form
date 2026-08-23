@@ -11,6 +11,7 @@ import type {
   AreaMeasurement,
   BridgeMessage,
   DeactivateToolPayload,
+  FocusMeasurementPayload,
   HostToViewerMessage,
   MeasurementAddedPayload,
   MeasurementRemovedPayload,
@@ -74,10 +75,13 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
     return null;
   }
 
+  const measurementFocus = value.capabilities.measurementFocus;
+
   if (
     !isNonEmptyString(value.viewerInstanceId) ||
     !Array.isArray(value.supportedTools) ||
     typeof value.capabilities.measurementDeletion !== 'boolean' ||
+    (measurementFocus !== undefined && typeof measurementFocus !== 'boolean') ||
     typeof value.capabilities.measurementUpdates !== 'boolean'
   ) {
     return null;
@@ -98,6 +102,7 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
     supportedTools,
     capabilities: {
       measurementDeletion: value.capabilities.measurementDeletion,
+      measurementFocus: measurementFocus ?? false,
       measurementUpdates: value.capabilities.measurementUpdates,
     },
   };
@@ -142,6 +147,23 @@ function parseDeactivateToolPayload(value: unknown): DeactivateToolPayload | nul
 }
 
 function parseRemoveMeasurementPayload(value: unknown): RemoveMeasurementPayload | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.targetViewerInstanceId) ||
+    !isNonEmptyString(value.rowId) ||
+    !isNonEmptyString(value.annotationId)
+  ) {
+    return null;
+  }
+
+  return {
+    targetViewerInstanceId: value.targetViewerInstanceId,
+    rowId: value.rowId,
+    annotationId: value.annotationId,
+  };
+}
+
+function parseFocusMeasurementPayload(value: unknown): FocusMeasurementPayload | null {
   if (
     !isRecord(value) ||
     !isNonEmptyString(value.targetViewerInstanceId) ||
@@ -296,6 +318,21 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         payload,
       };
     }
+    case BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT: {
+      const payload = parseFocusMeasurementPayload(value.payload);
+
+      if (!payload) {
+        return null;
+      }
+
+      return {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+        messageId: value.messageId,
+        payload,
+      };
+    }
     case BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED: {
       const payload = parseMeasurementAddedPayload(value.payload);
 
@@ -350,6 +387,7 @@ export function isHostToViewerMessage(message: BridgeMessage): message is HostTo
   return (
     message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL ||
     message.type === BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL ||
+    message.type === BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT ||
     message.type === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT
   );
 }

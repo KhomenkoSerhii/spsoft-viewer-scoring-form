@@ -34,10 +34,11 @@ finishes it from the matching `MEASUREMENT_UPDATED` event. Unrelated, malformed,
 duplicate measurement events are ignored.
 
 After creation, later `MEASUREMENT_UPDATED` events keep the correlated form row synchronized while
-the user edits the ellipse. A correlated `REMOVE_MEASUREMENT` command removes the OHIF measurement;
-the resulting service event is returned as `MEASUREMENT_REMOVED`. Deletion initiated directly in
-OHIF uses the same event path. Events for annotations that were not created through the bridge are
-ignored.
+the user edits the ellipse. `FOCUS_MEASUREMENT` verifies the established binding and uses OHIF's
+`jumpToMeasurementViewport` command to select the annotation and navigate a compatible viewport. A
+correlated `REMOVE_MEASUREMENT` command removes the OHIF measurement; the resulting service event
+is returned as `MEASUREMENT_REMOVED`. Deletion initiated directly in OHIF uses the same event path.
+Events and commands for annotations that were not created through the bridge are ignored.
 
 Mode exit restores Pan, removes the window listener, unsubscribes from OHIF services, cancels
 readiness retries, and clears session bindings.

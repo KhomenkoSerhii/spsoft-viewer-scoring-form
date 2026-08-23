@@ -46,7 +46,11 @@ describe('parseBridgeMessage', () => {
       {
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementDeletion: true, measurementUpdates: true },
+        capabilities: {
+          measurementDeletion: true,
+          measurementFocus: true,
+          measurementUpdates: true,
+        },
       },
       'message-ready'
     ),
@@ -69,6 +73,15 @@ describe('parseBridgeMessage', () => {
         reason: 'user-cancelled',
       },
       'message-deactivate'
+    ),
+    createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+      {
+        targetViewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+      'message-focus'
     ),
     createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
@@ -113,6 +126,59 @@ describe('parseBridgeMessage', () => {
     expect(parseBridgeMessage(message)).toEqual(message);
   });
 
+  it('defaults an omitted additive focus capability to false', () => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        messageId: 'message-ready-without-focus',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          supportedTools: ['EllipticalROI'],
+          capabilities: {
+            measurementDeletion: true,
+            measurementUpdates: true,
+          },
+        },
+      })
+    ).toEqual({
+      channel: BRIDGE_CHANNEL,
+      version: BRIDGE_VERSION,
+      type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+      messageId: 'message-ready-without-focus',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        supportedTools: ['EllipticalROI'],
+        capabilities: {
+          measurementDeletion: true,
+          measurementFocus: false,
+          measurementUpdates: true,
+        },
+      },
+    });
+  });
+
+  it('rejects a non-boolean focus capability', () => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        messageId: 'message-ready-with-invalid-focus',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          supportedTools: ['EllipticalROI'],
+          capabilities: {
+            measurementDeletion: true,
+            measurementFocus: 'true',
+            measurementUpdates: true,
+          },
+        },
+      })
+    ).toBeNull();
+  });
+
   it.each([
     ['channel', { channel: 'foreign.channel' }],
     ['version', { version: 2 }],
@@ -125,7 +191,11 @@ describe('parseBridgeMessage', () => {
       {
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementDeletion: false, measurementUpdates: false },
+        capabilities: {
+          measurementDeletion: false,
+          measurementFocus: false,
+          measurementUpdates: false,
+        },
       },
       'message-1'
     );
@@ -162,6 +232,22 @@ describe('parseBridgeMessage', () => {
           rowId: 'row-1',
           activationId: 'activation-1',
           reason: 'viewer-reloaded',
+        },
+      })
+    ).toBeNull();
+  });
+
+  it('rejects a focus command without complete correlation identifiers', () => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+        messageId: 'message-1',
+        payload: {
+          targetViewerInstanceId: 'viewer-1',
+          rowId: 'row-1',
+          annotationId: '',
         },
       })
     ).toBeNull();
@@ -243,7 +329,7 @@ describe('parseBridgeMessage', () => {
 describe('message direction guards', () => {
   it('distinguishes host commands from viewer events', () => {
     const hostCommand = createBridgeMessage(
-      BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT,
+      BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
       {
         targetViewerInstanceId: 'viewer-1',
         rowId: 'row-1',

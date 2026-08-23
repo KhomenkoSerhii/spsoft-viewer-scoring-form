@@ -9,8 +9,8 @@ typed `window.postMessage` protocol.
 
 The host app embeds the Viewer in an iframe. A user can add a form row, activate
 `EllipticalROI`, draw an annotation, and receive its area in the matching row. Later edits and
-deletions stay synchronized in both directions. Totals are calculated separately for each area
-unit.
+deletions stay synchronized in both directions. Clicking a completed form row selects its
+annotation and navigates the Viewer to it. Totals are calculated separately for each area unit.
 
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for the message contract and implementation decisions.
 
@@ -18,14 +18,15 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the message contract and implementa
 
 - `VIEWER_READY` handshake with one queued early activation
 - strict origin, source, protocol version, session, and payload checks
-- correlated activation, cancellation, creation, live updates, and deletion
+- correlated activation, cancellation, creation, focus navigation, live updates, and deletion
 - automatic return to Pan after drawing or cancellation
 - separate totals for `mm²`, `cm²`, `px²`, and unknown raw units
 - cleanup on iframe reload, mode exit, and React unmount
 - focused unit tests and two Playwright integration scenarios
 
-Optional task 5.1 (live updates) and 5.2 (bidirectional deletion) are included. Focus navigation,
-a second measurement tool, and persistence after a full page reload are outside the current scope.
+Optional tasks 5.1 (live updates), 5.2 (bidirectional deletion), and 5.3 (focus navigation) are
+included. A second measurement tool, viewport version labels, and persistence after a full page
+reload are outside the current scope.
 
 ## Prerequisites
 
@@ -101,8 +102,9 @@ The Viewer has a matching `spsoftViewerBridge.hostOrigin` entry in
 2. Select **Додати вимірювання**.
 3. Select **Активувати Ellipse** in the new row.
 4. Draw an ellipse in the Viewer.
-5. Drag an ellipse handle to see the value and total update.
-6. Delete from the form to remove the annotation, or delete in OHIF to clear the linked row.
+5. Select a completed form row to highlight its annotation and navigate to it in the Viewer.
+6. Drag an ellipse handle to see the value and total update.
+7. Delete from the form to remove the annotation, or delete in OHIF to clear the linked row.
 
 The displayed DICOM data comes from the public data source in the default OHIF configuration. No
 backend or local DICOM server is required.
