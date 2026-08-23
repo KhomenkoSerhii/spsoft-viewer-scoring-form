@@ -96,7 +96,7 @@ async function activateAndDrawMeasurement(
     .toBe(true);
 }
 
-test('host correlates ellipses, ignores unarmed tools, and resets after reload', async ({
+test('host correlates measurements and restores only persisted annotations after reload', async ({
   page,
 }) => {
   test.setTimeout(300_000);
@@ -843,6 +843,13 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     )
     .toBe(correlatedMessageCount);
 
+  const persistedRow = page.locator('.measurement-row--ready');
+  const persistedRowId = await persistedRow.getAttribute('data-row-id');
+
+  if (!persistedRowId || !remainingMeasurementValue) {
+    throw new Error('The remaining correlated row is unavailable for persistence testing.');
+  }
+
   await page.evaluate(() => {
     const observedWindow = window as Window & { __spsoftConnectionStates: string[] };
     observedWindow.__spsoftConnectionStates = [];
@@ -858,11 +865,6 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
     recordConnectionState();
   });
   await viewerFrame.locator('body').evaluate(() => window.location.reload());
-  await expect(measurementRow.getByText('Очікує')).toBeVisible();
-  await expect(measurementRow.locator('output')).toHaveText('—');
-  await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(2);
-  await expect(page.locator('[data-total-kind="area"] output')).toHaveText('—');
-  await expect(page.locator('[data-total-kind="length"] output')).toHaveText('—');
 
   await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
     timeout: 180_000,
@@ -893,6 +895,14 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
       () => (window as Window & { __spsoftConnectionStates: string[] }).__spsoftConnectionStates
     )
   ).toContain('Підключення до Viewer…');
+  const restoredRow = page.locator(`[data-row-id="${persistedRowId}"]`);
+  await expect(restoredRow.getByText('Готово')).toBeVisible();
+  await expect(restoredRow.locator('output')).toHaveText(remainingMeasurementValue);
+  await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(1);
+  await expect(page.locator('[data-total-kind="area"] output')).toHaveText(
+    remainingMeasurementValue
+  );
+  await expect(page.locator('[data-total-kind="length"] output')).toHaveText('—');
   await expect
     .poll(
       () =>
@@ -906,7 +916,74 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
         }),
       { timeout: 30_000 }
     )
-    .toBe(0);
+    .toBe(1);
+
+  const restoredAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    return cornerstoneWindow.cornerstoneTools?.annotation.state
+      .getAllAnnotations()
+      .find(annotation => annotation.metadata?.toolName === 'EllipticalROI')?.annotationUID;
+  });
+
+  if (!restoredAnnotationId) {
+    throw new Error('The persisted annotation was not restored after the iframe reload.');
+  }
+
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await expect(viewerFrame.locator('[data-cy="viewport-pane"]').first()).toBeVisible({
+    timeout: 180_000,
+  });
+  await expect(page.getByText('Viewer підключено')).toBeVisible({ timeout: 180_000 });
+  await expect(page.getByRole('article')).toHaveCount(2);
+  const fullyRestoredRow = page.locator(`[data-row-id="${persistedRowId}"]`);
+  await expect(fullyRestoredRow.getByText('Готово')).toBeVisible({ timeout: 30_000 });
+  await expect(fullyRestoredRow.locator('output')).toHaveText(remainingMeasurementValue);
+  await expect(page.getByRole('article').getByText('Очікує')).toHaveCount(1);
+  await expect(page.locator('[data-total-kind="area"] output')).toHaveText(
+    remainingMeasurementValue
+  );
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          const annotations =
+            cornerstoneWindow.cornerstoneTools?.annotation.state.getAllAnnotations() ?? [];
+          return annotations.filter(annotation => annotation.metadata?.toolName === 'EllipticalROI')
+            .length;
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(1);
+
+  const fullyRestoredAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    return cornerstoneWindow.cornerstoneTools?.annotation.state
+      .getAllAnnotations()
+      .find(annotation => annotation.metadata?.toolName === 'EllipticalROI')?.annotationUID;
+  });
+
+  if (!fullyRestoredAnnotationId) {
+    throw new Error('The persisted annotation was not restored after the full page reload.');
+  }
+
+  await fullyRestoredRow.getByRole('button', { name: /Показати вимірювання \d+ у Viewer/ }).click();
+  await expect
+    .poll(() =>
+      viewerFrame.locator('body').evaluate(() => {
+        const bridgeWindow = window as Window & {
+          __spsoftBridgeMessages: CapturedBridgeMessage[];
+        };
+        return bridgeWindow.__spsoftBridgeMessages
+          .filter(
+            message =>
+              message.origin === 'http://localhost:5173' &&
+              message.data?.type === 'FOCUS_MEASUREMENT'
+          )
+          .at(-1)?.data.payload?.annotationId;
+      })
+    )
+    .toBe(fullyRestoredAnnotationId);
 
   await expect(viewerFrame.getByText('Uncaught runtime errors:')).toHaveCount(0);
   expect(runtimeErrors).toEqual([]);
@@ -964,6 +1041,7 @@ test('host queues early activation and ignores malformed messages from the Viewe
           measurementDeletion: false,
           measurementFocus: false,
           measurementUpdates: false,
+          statePersistence: false,
         },
       },
     };

@@ -13,19 +13,26 @@ untrusted.
 | Host → viewer | `DEACTIVATE_TOOL` |
 | Host → viewer | `FOCUS_MEASUREMENT` |
 | Host → viewer | `REMOVE_MEASUREMENT` |
+| Host → viewer | `RESTORE_MEASUREMENTS` |
 | Viewer → host | `MEASUREMENT_ADDED` |
 | Viewer → host | `MEASUREMENT_UPDATED` |
 | Viewer → host | `MEASUREMENT_REMOVED` |
+| Viewer → host | `MEASUREMENTS_RESTORED` |
 
 Every message uses channel `spsoft.viewer-bridge`, protocol version `1` and a caller-provided
 `messageId`. Callers generate IDs with `crypto.randomUUID()` so tests can supply deterministic
 values.
 
-`VIEWER_READY` advertises support for focus navigation, live updates, and deletion. Commands carry
+`VIEWER_READY` advertises support for focus navigation, live updates, deletion, and persistence. Commands carry
 the target Viewer session ID, while measurement events carry the session ID that produced them.
 Creation also includes an activation ID; focus, updates, and removals use the established
 row-to-annotation binding. For compatibility with Viewer builds that predate focus navigation, an
-omitted `capabilities.measurementFocus` is parsed as `false`; a present value must be boolean.
+omitted `capabilities.measurementFocus` or `capabilities.statePersistence` is parsed as `false`; a
+present value must be boolean.
+
+Persistence uses a command/confirmation pair. `RESTORE_MEASUREMENTS` carries a bounded, unique list
+of host-owned row/annotation/tool bindings. `MEASUREMENTS_RESTORED` returns only bindings that the
+Viewer recreated, together with their validated normalized measurements.
 
 ## Boundary validation
 

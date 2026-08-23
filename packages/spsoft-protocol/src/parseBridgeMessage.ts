@@ -16,17 +16,23 @@ import type {
   HostToViewerMessage,
   LengthMeasurement,
   Measurement,
+  MeasurementBinding,
   MeasurementAddedPayload,
   MeasurementRemovedPayload,
+  MeasurementsRestoredPayload,
   MeasurementUpdatedPayload,
   RemoveMeasurementPayload,
+  RestoreMeasurementsPayload,
+  RestoredMeasurement,
   SupportedToolName,
   ViewerReadyPayload,
   ViewerToHostMessage,
 } from './types';
 import { normalizeAreaUnit, normalizeLengthUnit } from './units';
+import { measurementMatchesTool } from './measurements';
 
 type UnknownRecord = Record<string, unknown>;
+const MAX_RESTORED_MEASUREMENTS = 100;
 
 function isRecord(value: unknown): value is UnknownRecord {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -105,7 +111,7 @@ function parseLengthMeasurement(value: unknown): LengthMeasurement | null {
   };
 }
 
-function parseMeasurement(value: unknown): Measurement | null {
+export function parseMeasurement(value: unknown): Measurement | null {
   if (!isRecord(value)) {
     return null;
   }
@@ -127,13 +133,15 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
   }
 
   const measurementFocus = value.capabilities.measurementFocus;
+  const statePersistence = value.capabilities.statePersistence;
 
   if (
     !isNonEmptyString(value.viewerInstanceId) ||
     !Array.isArray(value.supportedTools) ||
     typeof value.capabilities.measurementDeletion !== 'boolean' ||
     (measurementFocus !== undefined && typeof measurementFocus !== 'boolean') ||
-    typeof value.capabilities.measurementUpdates !== 'boolean'
+    typeof value.capabilities.measurementUpdates !== 'boolean' ||
+    (statePersistence !== undefined && typeof statePersistence !== 'boolean')
   ) {
     return null;
   }
@@ -155,8 +163,102 @@ function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
       measurementDeletion: value.capabilities.measurementDeletion,
       measurementFocus: measurementFocus ?? false,
       measurementUpdates: value.capabilities.measurementUpdates,
+      statePersistence: statePersistence ?? false,
     },
   };
+}
+
+function parseMeasurementBinding(value: unknown): MeasurementBinding | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.annotationId) ||
+    !isNonEmptyString(value.rowId) ||
+    !isOneOf(value.toolName, SUPPORTED_TOOLS)
+  ) {
+    return null;
+  }
+
+  return {
+    annotationId: value.annotationId,
+    rowId: value.rowId,
+    toolName: value.toolName,
+  };
+}
+
+function parseMeasurementBindings(value: unknown): MeasurementBinding[] | null {
+  if (!Array.isArray(value) || value.length > MAX_RESTORED_MEASUREMENTS) {
+    return null;
+  }
+
+  const measurements: MeasurementBinding[] = [];
+  const annotationIds = new Set<string>();
+  const rowIds = new Set<string>();
+
+  for (const candidate of value) {
+    const measurement = parseMeasurementBinding(candidate);
+
+    if (
+      !measurement ||
+      annotationIds.has(measurement.annotationId) ||
+      rowIds.has(measurement.rowId)
+    ) {
+      return null;
+    }
+
+    annotationIds.add(measurement.annotationId);
+    rowIds.add(measurement.rowId);
+    measurements.push(measurement);
+  }
+
+  return measurements;
+}
+
+function parseRestoreMeasurementsPayload(value: unknown): RestoreMeasurementsPayload | null {
+  if (!isRecord(value) || !isNonEmptyString(value.targetViewerInstanceId)) {
+    return null;
+  }
+
+  const measurements = parseMeasurementBindings(value.measurements);
+
+  return measurements
+    ? { targetViewerInstanceId: value.targetViewerInstanceId, measurements }
+    : null;
+}
+
+function parseMeasurementsRestoredPayload(value: unknown): MeasurementsRestoredPayload | null {
+  if (
+    !isRecord(value) ||
+    !isNonEmptyString(value.viewerInstanceId) ||
+    !Array.isArray(value.measurements) ||
+    value.measurements.length > MAX_RESTORED_MEASUREMENTS
+  ) {
+    return null;
+  }
+
+  const measurements: RestoredMeasurement[] = [];
+  const annotationIds = new Set<string>();
+  const rowIds = new Set<string>();
+
+  for (const candidate of value.measurements) {
+    const binding = parseMeasurementBinding(candidate);
+    const measurement = isRecord(candidate) ? parseMeasurement(candidate.measurement) : null;
+
+    if (
+      !binding ||
+      !measurement ||
+      !measurementMatchesTool(measurement, binding.toolName) ||
+      annotationIds.has(binding.annotationId) ||
+      rowIds.has(binding.rowId)
+    ) {
+      return null;
+    }
+
+    annotationIds.add(binding.annotationId);
+    rowIds.add(binding.rowId);
+    measurements.push({ ...binding, measurement });
+  }
+
+  return { viewerInstanceId: value.viewerInstanceId, measurements };
 }
 
 function parseActivateToolPayload(value: unknown): ActivateToolPayload | null {
@@ -384,6 +486,21 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         payload,
       };
     }
+    case BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS: {
+      const payload = parseRestoreMeasurementsPayload(value.payload);
+
+      if (!payload) {
+        return null;
+      }
+
+      return {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+        messageId: value.messageId,
+        payload,
+      };
+    }
     case BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED: {
       const payload = parseMeasurementAddedPayload(value.payload);
 
@@ -429,6 +546,21 @@ export function parseBridgeMessage(value: unknown): BridgeMessage | null {
         payload,
       };
     }
+    case BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED: {
+      const payload = parseMeasurementsRestoredPayload(value.payload);
+
+      if (!payload) {
+        return null;
+      }
+
+      return {
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+        messageId: value.messageId,
+        payload,
+      };
+    }
     default:
       return null;
   }
@@ -439,7 +571,8 @@ export function isHostToViewerMessage(message: BridgeMessage): message is HostTo
     message.type === BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL ||
     message.type === BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL ||
     message.type === BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT ||
-    message.type === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT
+    message.type === BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT ||
+    message.type === BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS
   );
 }
 

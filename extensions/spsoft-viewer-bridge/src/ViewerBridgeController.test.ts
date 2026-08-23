@@ -10,6 +10,7 @@ import type {
   BridgeEventService,
   BridgeSubscription,
   BridgeWindow,
+  AnnotationRepository,
   MessageTarget,
   ToolGroup,
   ToolGroupService,
@@ -17,6 +18,7 @@ import type {
   ViewportGridService,
   ViewportGridState,
 } from './types';
+import { ViewerPersistenceStore } from './persistence';
 import { ViewerBridgeController } from './ViewerBridgeController';
 
 class FakeEventService implements BridgeEventService {
@@ -48,6 +50,7 @@ class FakeEventService implements BridgeEventService {
 
 class FakeMeasurementService extends FakeEventService {
   readonly removedMeasurementIds: string[] = [];
+  private readonly measurements = new Map<string, unknown>();
 
   constructor() {
     super({
@@ -58,12 +61,33 @@ class FakeMeasurementService extends FakeEventService {
   }
 
   getMeasurement(measurementId: string): unknown {
-    return { uid: measurementId };
+    return this.measurements.get(measurementId) ?? { uid: measurementId };
+  }
+
+  setMeasurement(measurementId: string, measurement: unknown): void {
+    this.measurements.set(measurementId, measurement);
   }
 
   remove(measurementId: string): void {
     this.removedMeasurementIds.push(measurementId);
+    this.measurements.delete(measurementId);
     this.emit(this.EVENTS.MEASUREMENT_REMOVED!, { measurement: measurementId });
+  }
+}
+
+class MemoryStorage {
+  private readonly values = new Map<string, string>();
+
+  getItem(key: string): string | null {
+    return this.values.get(key) ?? null;
+  }
+
+  removeItem(key: string): void {
+    this.values.delete(key);
+  }
+
+  setItem(key: string, value: string): void {
+    this.values.set(key, value);
   }
 }
 
@@ -144,7 +168,12 @@ class FakeBridgeWindow implements BridgeWindow {
 function createHarness({
   supportsEllipse = true,
   supportsLength = true,
-}: { supportsEllipse?: boolean; supportsLength?: boolean } = {}) {
+  withPersistence = false,
+}: {
+  supportsEllipse?: boolean;
+  supportsLength?: boolean;
+  withPersistence?: boolean;
+} = {}) {
   const bridgeWindow = new FakeBridgeWindow();
   const measurementService = new FakeMeasurementService();
   const viewportGridService = new FakeViewportGridService();
@@ -158,6 +187,38 @@ function createHarness({
   const onHostMessage = jest.fn();
   const onCommandError = jest.fn();
   const commandsManager = { runCommand: jest.fn() };
+  const storage = new MemoryStorage();
+  const persistenceStore = new ViewerPersistenceStore(storage, 'study-1');
+  const annotations = new Map<string, Record<string, unknown>>();
+  const annotationRepository: AnnotationRepository = {
+    add: annotation => {
+      const annotationId = annotation.annotationUID;
+      const metadata = annotation.metadata;
+      const data = annotation.data;
+
+      if (
+        typeof annotationId !== 'string' ||
+        typeof metadata !== 'object' ||
+        metadata === null ||
+        typeof data !== 'object' ||
+        data === null
+      ) {
+        throw new Error('Invalid test annotation.');
+      }
+
+      annotations.set(annotationId, annotation);
+      measurementService.setMeasurement(annotationId, {
+        uid: annotationId,
+        toolName: (metadata as { toolName?: unknown }).toolName,
+        data: (data as { cachedStats?: unknown }).cachedStats,
+      });
+      return annotationId;
+    },
+    get: annotationId => annotations.get(annotationId),
+    remove: annotationId => {
+      annotations.delete(annotationId);
+    },
+  };
   const controller = new ViewerBridgeController({
     bridgeWindow,
     commandsManager,
@@ -166,6 +227,7 @@ function createHarness({
     createId: () => ids.shift() ?? 'fallback-id',
     onCommandError,
     onHostMessage,
+    ...(withPersistence ? { annotationRepository, persistenceStore } : {}),
   });
 
   const makeReady = () => {
@@ -183,12 +245,15 @@ function createHarness({
 
   return {
     bridgeWindow,
+    annotationRepository,
+    annotations,
     commandsManager,
     controller,
     makeReady,
     measurementService,
     onCommandError,
     onHostMessage,
+    persistenceStore,
     toolGroupService,
     viewportGridService,
   };
@@ -227,6 +292,7 @@ describe('ViewerBridgeController handshake', () => {
           measurementDeletion: true,
           measurementFocus: true,
           measurementUpdates: true,
+          statePersistence: false,
         },
       },
     });
@@ -814,6 +880,226 @@ describe('ViewerBridgeController measurement correlation', () => {
     expect(bridgeWindow.postedMessages).toHaveLength(3);
     expect(parseBridgeMessage(bridgeWindow.postedMessages[2]?.message)).toEqual(
       expect.objectContaining({ type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED })
+    );
+  });
+});
+
+describe('ViewerBridgeController persistence', () => {
+  beforeEach(() => jest.useFakeTimers());
+
+  afterEach(() => {
+    jest.clearAllTimers();
+    jest.useRealTimers();
+  });
+
+  it('restores only a host-confirmed annotation and rebuilds its correlation maps', () => {
+    const { annotations, bridgeWindow, commandsManager, controller, makeReady, persistenceStore } =
+      createHarness({ withPersistence: true });
+    const annotation = {
+      annotationUID: 'annotation-restored',
+      metadata: {
+        toolName: 'EllipticalROI',
+        FrameOfReferenceUID: 'frame-1',
+        referencedImageId: 'wadors:image-1',
+      },
+      data: {
+        handles: {
+          points: [
+            [1, 2, 3],
+            [4, 5, 6],
+            [7, 8, 9],
+            [10, 11, 12],
+          ],
+        },
+        cachedStats: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    };
+    persistenceStore.upsert({
+      annotation,
+      annotationId: 'annotation-restored',
+      rowId: 'row-restored',
+      toolName: 'EllipticalROI',
+      measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+    });
+
+    controller.enterMode();
+    makeReady();
+
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[0]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.VIEWER_READY,
+        payload: expect.objectContaining({
+          capabilities: expect.objectContaining({ statePersistence: true }),
+        }),
+      })
+    );
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          measurements: [
+            {
+              annotationId: 'annotation-restored',
+              rowId: 'row-restored',
+              toolName: 'EllipticalROI',
+            },
+          ],
+        },
+        'restore-command'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(annotations.get('annotation-restored')).toEqual(annotation);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+        payload: {
+          viewerInstanceId: 'viewer-session-1',
+          measurements: [
+            {
+              annotationId: 'annotation-restored',
+              rowId: 'row-restored',
+              toolName: 'EllipticalROI',
+              measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+            },
+          ],
+        },
+      })
+    );
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-restored',
+          annotationId: 'annotation-restored',
+        },
+        'focus-restored'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(commandsManager.runCommand).toHaveBeenCalledWith(
+      'jumpToMeasurementViewport',
+      expect.objectContaining({ annotationUID: 'annotation-restored' })
+    );
+  });
+
+  it('removes Viewer storage entries that the host no longer owns', () => {
+    const { bridgeWindow, controller, makeReady, persistenceStore } = createHarness({
+      withPersistence: true,
+    });
+    persistenceStore.upsert({
+      annotation: {
+        annotationUID: 'orphan',
+        metadata: {
+          toolName: 'Length',
+          FrameOfReferenceUID: 'frame-1',
+          referencedImageId: 'wadors:image-1',
+        },
+        data: {
+          handles: {
+            points: [
+              [1, 2, 3],
+              [4, 5, 6],
+            ],
+          },
+          cachedStats: { target: { length: 10, unit: 'mm' } },
+        },
+      },
+      annotationId: 'orphan',
+      rowId: 'orphan-row',
+      toolName: 'Length',
+      measurement: { kind: 'length', value: 10, unit: 'mm', rawUnit: 'mm' },
+    });
+    controller.enterMode();
+    makeReady();
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+        { targetViewerInstanceId: 'viewer-session-1', measurements: [] },
+        'restore-empty'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(persistenceStore.load()).toEqual([]);
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+        payload: { viewerInstanceId: 'viewer-session-1', measurements: [] },
+      })
+    );
+  });
+
+  it('removes a partially restored annotation when OHIF cannot recreate its measurement', () => {
+    const {
+      annotations,
+      bridgeWindow,
+      controller,
+      makeReady,
+      measurementService,
+      onCommandError,
+      persistenceStore,
+    } = createHarness({ withPersistence: true });
+    persistenceStore.upsert({
+      annotation: {
+        annotationUID: 'broken-annotation',
+        metadata: {
+          toolName: 'Length',
+          FrameOfReferenceUID: 'frame-1',
+          referencedImageId: 'wadors:image-1',
+        },
+        data: {
+          handles: {
+            points: [
+              [1, 2, 3],
+              [4, 5, 6],
+            ],
+          },
+          cachedStats: { target: { length: 10, unit: 'mm' } },
+        },
+      },
+      annotationId: 'broken-annotation',
+      rowId: 'broken-row',
+      toolName: 'Length',
+      measurement: { kind: 'length', value: 10, unit: 'mm', rawUnit: 'mm' },
+    });
+    jest.spyOn(measurementService, 'getMeasurement').mockReturnValue(undefined);
+    controller.enterMode();
+    makeReady();
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          measurements: [
+            {
+              annotationId: 'broken-annotation',
+              rowId: 'broken-row',
+              toolName: 'Length',
+            },
+          ],
+        },
+        'restore-broken'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(annotations.has('broken-annotation')).toBe(false);
+    expect(persistenceStore.load()).toEqual([]);
+    expect(onCommandError).toHaveBeenCalledWith(expect.any(Error));
+    expect(parseBridgeMessage(bridgeWindow.postedMessages[1]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+        payload: { viewerInstanceId: 'viewer-session-1', measurements: [] },
+      })
     );
   });
 });

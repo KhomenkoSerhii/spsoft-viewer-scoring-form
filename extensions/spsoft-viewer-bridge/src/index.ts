@@ -1,6 +1,7 @@
 import { parseViewerBridgeConfiguration } from './configuration';
 import { id } from './id';
 import type { BridgeWindow, ViewerBridgeServices } from './types';
+import { ViewerPersistenceStore } from './persistence';
 import {
   ViewerBridgeController,
   type ViewerBridgeControllerOptions,
@@ -28,7 +29,65 @@ interface ViewerBridgeExtensionDependencies {
   controllerFactory?: (options: ViewerBridgeControllerOptions) => ViewerBridgeLifecycleController;
   createId?: () => string;
   getBridgeWindow?: () => BridgeWindow;
+  getPersistenceOptions?: () => Pick<
+    ViewerBridgeControllerOptions,
+    'annotationRepository' | 'persistenceStore'
+  >;
   warn?: (message: string, error: unknown) => void;
+}
+
+interface CornerstoneWindow extends Window {
+  cornerstoneTools?: {
+    annotation?: {
+      state?: {
+        addAnnotation(annotation: Record<string, unknown>): string;
+        getAnnotation(annotationId: string): Record<string, unknown> | undefined;
+        removeAnnotation(annotationId: string): void;
+      };
+    };
+  };
+}
+
+function getDefaultPersistenceOptions(): Pick<
+  ViewerBridgeControllerOptions,
+  'annotationRepository' | 'persistenceStore'
+> {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  const studyInstanceUid = new URLSearchParams(window.location.search)
+    .get('StudyInstanceUIDs')
+    ?.split(',')[0]
+    ?.trim();
+
+  if (!studyInstanceUid) {
+    return {};
+  }
+
+  try {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    const getAnnotationState = () => cornerstoneWindow.cornerstoneTools?.annotation?.state;
+
+    return {
+      annotationRepository: {
+        add: annotation => {
+          const annotationState = getAnnotationState();
+
+          if (!annotationState) {
+            throw new Error('Cornerstone annotation state is unavailable.');
+          }
+
+          return annotationState.addAnnotation(annotation);
+        },
+        get: annotationId => getAnnotationState()?.getAnnotation(annotationId),
+        remove: annotationId => getAnnotationState()?.removeAnnotation(annotationId),
+      },
+      persistenceStore: new ViewerPersistenceStore(window.localStorage, studyInstanceUid),
+    };
+  } catch {
+    return {};
+  }
 }
 
 function hasHostOrigin(value: unknown): boolean {
@@ -44,6 +103,7 @@ export function createViewerBridgeExtension(dependencies: ViewerBridgeExtensionD
   const controllerFactory =
     dependencies.controllerFactory ?? (options => new ViewerBridgeController(options));
   const getBridgeWindow = dependencies.getBridgeWindow ?? (() => window);
+  const getPersistenceOptions = dependencies.getPersistenceOptions ?? getDefaultPersistenceOptions;
   const createId = dependencies.createId ?? (() => window.crypto.randomUUID());
   const warn =
     dependencies.warn ??
@@ -75,6 +135,7 @@ export function createViewerBridgeExtension(dependencies: ViewerBridgeExtensionD
           hostOrigin,
           services: servicesManager.services,
           createId,
+          ...getPersistenceOptions(),
           onCommandError: error => warn('Viewer bridge command could not be applied.', error),
         });
         nextController.install();

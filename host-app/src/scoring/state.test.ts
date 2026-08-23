@@ -5,6 +5,7 @@ const viewerCapabilities = {
   measurementDeletion: true,
   measurementFocus: true,
   measurementUpdates: true,
+  statePersistence: false,
 } as const;
 
 describe('scoringReducer', () => {
@@ -355,6 +356,7 @@ describe('scoringReducer', () => {
           measurementDeletion: false,
           measurementFocus: false,
           measurementUpdates: false,
+          statePersistence: false,
         },
       },
     });
@@ -375,6 +377,7 @@ describe('scoringReducer', () => {
         measurementDeletion: false,
         measurementFocus: false,
         measurementUpdates: false,
+        statePersistence: false,
       },
       status: 'ready',
       viewerInstanceId: 'viewer-1',
@@ -443,10 +446,10 @@ describe('scoringReducer', () => {
     });
   });
 
-  it('clears completed bindings while the viewer reloads', () => {
+  it('keeps completed bindings pending while a persistent Viewer reloads', () => {
     const readyState = {
       connection: {
-        capabilities: viewerCapabilities,
+        capabilities: { ...viewerCapabilities, statePersistence: true },
         status: 'ready' as const,
         viewerInstanceId: 'viewer-1',
         supportedTools: ['EllipticalROI' as const],
@@ -467,7 +470,82 @@ describe('scoringReducer', () => {
 
     expect(loading.connection).toEqual({ status: 'connecting' });
     expect(loading.rows).toEqual([
-      { id: 'row-1', status: 'waiting', toolName: 'EllipticalROI' },
+      {
+        id: 'row-1',
+        status: 'restoring',
+        annotationId: 'annotation-1',
+        measurement: { kind: 'area', value: 42, unit: 'mm2', rawUnit: 'mm²' },
+        toolName: 'EllipticalROI',
+      },
+      { id: 'row-2', status: 'waiting', toolName: 'Length' },
+    ]);
+  });
+
+  it('keeps a queued pre-handshake activation while the iframe starts loading', () => {
+    const queued: ScoringState = {
+      connection: { status: 'connecting' },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'queued',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+      ],
+    };
+
+    expect(scoringReducer(queued, { type: 'viewerLoading' }).rows).toEqual(queued.rows);
+  });
+
+  it('accepts matching restoration confirmations and resets missing annotations', () => {
+    const state: ScoringState = {
+      connection: {
+        capabilities: { ...viewerCapabilities, statePersistence: true },
+        status: 'ready',
+        viewerInstanceId: 'viewer-2',
+        supportedTools: ['EllipticalROI', 'Length'],
+      },
+      rows: [
+        {
+          id: 'row-1',
+          status: 'restoring',
+          annotationId: 'annotation-1',
+          toolName: 'EllipticalROI',
+          measurement: { kind: 'area', value: 40, unit: 'mm2', rawUnit: 'mm²' },
+        },
+        {
+          id: 'row-2',
+          status: 'restoring',
+          annotationId: 'annotation-2',
+          toolName: 'Length',
+          measurement: { kind: 'length', value: 10, unit: 'mm', rawUnit: 'mm' },
+        },
+      ],
+    };
+
+    const restored = scoringReducer(state, {
+      type: 'measurementsRestored',
+      payload: {
+        viewerInstanceId: 'viewer-2',
+        measurements: [
+          {
+            annotationId: 'annotation-1',
+            rowId: 'row-1',
+            toolName: 'EllipticalROI',
+            measurement: { kind: 'area', value: 42, unit: 'mm2', rawUnit: 'mm²' },
+          },
+        ],
+      },
+    });
+
+    expect(restored.rows).toEqual([
+      {
+        id: 'row-1',
+        status: 'ready',
+        annotationId: 'annotation-1',
+        toolName: 'EllipticalROI',
+        measurement: { kind: 'area', value: 42, unit: 'mm2', rawUnit: 'mm²' },
+      },
       { id: 'row-2', status: 'waiting', toolName: 'Length' },
     ]);
   });
@@ -482,6 +560,7 @@ describe('scoringReducer', () => {
           measurementDeletion: false,
           measurementFocus: false,
           measurementUpdates: false,
+          statePersistence: false,
         },
       },
     });
@@ -507,6 +586,7 @@ describe('scoringReducer', () => {
           measurementDeletion: false,
           measurementFocus: false,
           measurementUpdates: false,
+          statePersistence: false,
         },
       },
     });

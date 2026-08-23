@@ -3,20 +3,25 @@ import {
   SUPPORTED_TOOLS,
   createBridgeMessage,
   isHostToViewerMessage,
+  measurementMatchesTool,
   parseBridgeMessage,
   type Measurement,
+  type MeasurementBinding,
+  type RestoredMeasurement,
   type SupportedToolName,
 } from '@spsoft/viewer-protocol';
 
 import type {
   BridgeSubscription,
   BridgeWindow,
+  AnnotationRepository,
   HostMessageHandler,
   ToolGroup,
   ViewerBridgeCommandsManager,
   ViewerBridgeServices,
   ViewportGridState,
 } from './types';
+import { ViewerPersistenceStore, type PersistedViewerMeasurement } from './persistence';
 import {
   extractRemovedAnnotationId,
   extractSupportedMeasurement,
@@ -46,6 +51,8 @@ export interface ViewerBridgeControllerOptions {
   createId: () => string;
   onHostMessage?: HostMessageHandler;
   onCommandError?: (error: unknown) => void;
+  annotationRepository?: AnnotationRepository;
+  persistenceStore?: ViewerPersistenceStore;
 }
 
 interface ArmedActivation {
@@ -63,6 +70,8 @@ export class ViewerBridgeController {
   private readonly createId: () => string;
   private readonly onHostMessage: HostMessageHandler | undefined;
   private readonly onCommandError: ((error: unknown) => void) | undefined;
+  private readonly annotationRepository: AnnotationRepository | undefined;
+  private readonly persistenceStore: ViewerPersistenceStore | undefined;
   private readonly subscriptions: BridgeSubscription[] = [];
   private readonly rowIdsByAnnotationId = new Map<string, string>();
   private readonly toolNamesByAnnotationId = new Map<string, SupportedToolName>();
@@ -83,6 +92,8 @@ export class ViewerBridgeController {
     this.createId = options.createId;
     this.onHostMessage = options.onHostMessage;
     this.onCommandError = options.onCommandError;
+    this.annotationRepository = options.annotationRepository;
+    this.persistenceStore = options.persistenceStore;
   }
 
   install(): void {
@@ -252,7 +263,7 @@ export class ViewerBridgeController {
     const toolName = this.toolNamesByAnnotationId.get(annotationId);
     const extractedMeasurement = toolName ? extractSupportedMeasurement(event, toolName) : null;
 
-    if (!rowId || !extractedMeasurement) {
+    if (!rowId || !toolName || !extractedMeasurement) {
       return;
     }
 
@@ -278,6 +289,7 @@ export class ViewerBridgeController {
 
     this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
     this.lastMeasurementsByAnnotationId.set(annotationId, extractedMeasurement.measurement);
+    this.persistMeasurement(annotationId, rowId, toolName, extractedMeasurement.measurement);
   };
 
   private readonly handleMeasurementRemoved = (event: unknown): void => {
@@ -295,6 +307,7 @@ export class ViewerBridgeController {
     this.rowIdsByAnnotationId.delete(annotationId);
     this.toolNamesByAnnotationId.delete(annotationId);
     this.lastMeasurementsByAnnotationId.delete(annotationId);
+    this.persistenceStore?.remove(annotationId);
     const message = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
       {
@@ -337,6 +350,12 @@ export class ViewerBridgeController {
     );
 
     this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
+    this.persistMeasurement(
+      extractedMeasurement.annotationId,
+      rowId,
+      toolName,
+      extractedMeasurement.measurement
+    );
     this.deactivateArmedTool();
   }
 
@@ -363,6 +382,11 @@ export class ViewerBridgeController {
       }
 
       this.armedActivation = { rowId, activationId, toolName };
+      return;
+    }
+
+    if (message.type === BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS) {
+      this.restoreMeasurements(message.payload.measurements);
       return;
     }
 
@@ -416,6 +440,117 @@ export class ViewerBridgeController {
     this.setToolActive('Pan');
   }
 
+  private persistMeasurement(
+    annotationId: string,
+    rowId: string,
+    toolName: SupportedToolName,
+    measurement: Measurement
+  ): void {
+    const annotation = this.annotationRepository?.get(annotationId);
+
+    if (!annotation || !this.persistenceStore) {
+      return;
+    }
+
+    this.persistenceStore.upsert({ annotation, annotationId, measurement, rowId, toolName });
+  }
+
+  private restoreMeasurements(bindings: MeasurementBinding[]): void {
+    if (!this.viewerInstanceId || !this.persistenceStore || !this.annotationRepository) {
+      this.publishRestoredMeasurements([]);
+      return;
+    }
+
+    const expectedByAnnotationId = new Map(
+      bindings.map(binding => [binding.annotationId, binding])
+    );
+    const storedMeasurements = this.persistenceStore.load();
+    const restoredMeasurements: RestoredMeasurement[] = [];
+    const retainedMeasurements: PersistedViewerMeasurement[] = [];
+
+    for (const stored of storedMeasurements) {
+      const expected = expectedByAnnotationId.get(stored.annotationId);
+
+      if (expected?.rowId !== stored.rowId || expected.toolName !== stored.toolName) {
+        if (this.annotationRepository.get(stored.annotationId)) {
+          this.annotationRepository.remove(stored.annotationId);
+        }
+        continue;
+      }
+
+      try {
+        if (!this.annotationRepository.get(stored.annotationId)) {
+          this.rowIdsByAnnotationId.set(stored.annotationId, stored.rowId);
+          this.toolNamesByAnnotationId.set(stored.annotationId, stored.toolName);
+
+          if (this.annotationRepository.add(stored.annotation) !== stored.annotationId) {
+            throw new Error('The restored annotation ID changed.');
+          }
+        }
+
+        const serviceMeasurement = this.services.measurementService.getMeasurement(
+          stored.annotationId
+        );
+        const extracted = extractSupportedMeasurement(
+          { measurement: serviceMeasurement },
+          stored.toolName
+        );
+
+        if (
+          !extracted ||
+          extracted.annotationId !== stored.annotationId ||
+          !measurementMatchesTool(extracted.measurement, stored.toolName)
+        ) {
+          throw new Error('OHIF did not recreate the stored measurement.');
+        }
+
+        const annotation = this.annotationRepository.get(stored.annotationId);
+
+        if (!annotation) {
+          throw new Error('Cornerstone did not retain the restored annotation.');
+        }
+
+        this.rowIdsByAnnotationId.set(stored.annotationId, stored.rowId);
+        this.toolNamesByAnnotationId.set(stored.annotationId, stored.toolName);
+        this.lastMeasurementsByAnnotationId.set(stored.annotationId, extracted.measurement);
+        retainedMeasurements.push({ ...stored, annotation, measurement: extracted.measurement });
+        restoredMeasurements.push({
+          annotationId: stored.annotationId,
+          rowId: stored.rowId,
+          toolName: stored.toolName,
+          measurement: extracted.measurement,
+        });
+      } catch (error) {
+        this.rowIdsByAnnotationId.delete(stored.annotationId);
+        this.toolNamesByAnnotationId.delete(stored.annotationId);
+        this.lastMeasurementsByAnnotationId.delete(stored.annotationId);
+
+        if (this.annotationRepository.get(stored.annotationId)) {
+          this.annotationRepository.remove(stored.annotationId);
+        }
+
+        this.onCommandError?.(error);
+      }
+    }
+
+    this.persistenceStore.replace(retainedMeasurements);
+    this.publishRestoredMeasurements(restoredMeasurements);
+  }
+
+  private publishRestoredMeasurements(measurements: RestoredMeasurement[]): void {
+    if (!this.viewerInstanceId) {
+      return;
+    }
+
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+      { viewerInstanceId: this.viewerInstanceId, measurements },
+      this.createId()
+    );
+
+    this.bridgeWindow.parent.postMessage(message, this.hostOrigin);
+  }
+
   private setToolActive(toolName: string): boolean {
     try {
       this.commandsManager.runCommand('setToolActive', { toolName });
@@ -465,6 +600,7 @@ export class ViewerBridgeController {
           measurementDeletion: true,
           measurementFocus: true,
           measurementUpdates: true,
+          statePersistence: Boolean(this.annotationRepository && this.persistenceStore),
         },
       },
       this.createId()

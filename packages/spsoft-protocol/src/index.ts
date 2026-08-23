@@ -12,6 +12,7 @@ export { measurementMatchesTool } from './measurements';
 export {
   isHostToViewerMessage,
   isViewerToHostMessage,
+  parseMeasurement,
   parseBridgeMessage,
 } from './parseBridgeMessage';
 export {
@@ -38,10 +39,14 @@ export type {
   LengthMeasurement,
   LengthUnit,
   Measurement,
+  MeasurementBinding,
   MeasurementAddedPayload,
   MeasurementRemovedPayload,
+  MeasurementsRestoredPayload,
   MeasurementUpdatedPayload,
   RemoveMeasurementPayload,
+  RestoreMeasurementsPayload,
+  RestoredMeasurement,
   SupportedToolName,
   ViewerReadyPayload,
   ViewerToHostMessage,

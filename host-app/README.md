@@ -62,7 +62,8 @@ Completing the annotation stores its correlated annotation ID and displays its n
 length in the matching row. The expected tool and measurement kind are checked on both sides of the
 bridge. Accepted message and annotation IDs are retained for the current Viewer session so a
 duplicate cannot complete another row. Reloading the iframe invalidates completed bindings and
-returns those rows to the waiting state because the new Viewer no longer contains their annotations.
+temporarily marks completed rows as restoring. The host then requests only its persisted bindings;
+confirmed Viewer annotations return to ready, while missing annotations return to waiting.
 
 Editing a correlated annotation in OHIF updates its form row and totals. **Delete** sends a correlated
 removal command and waits for Viewer confirmation before removing the row. If the user deletes the
@@ -76,6 +77,10 @@ numeric value and exact OHIF unit. The footer derives independent area and lengt
 completed rows and displays a separate total for every normalized unit. It never implicitly converts
 or combines physical and pixel units; unknown units are grouped only when their normalized raw
 labels match.
+
+The form snapshot is versioned and scoped by `VITE_VIEWER_STUDY_UID` in local storage. Completed
+rows retain their normalized measurement and correlation IDs; transient drawing states restart as
+waiting. Invalid or unavailable storage never prevents the in-memory form from starting.
 
 ## Checks
 

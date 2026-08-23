@@ -39,6 +39,7 @@ export interface ViewerReadyPayload {
     measurementDeletion: boolean;
     measurementFocus: boolean;
     measurementUpdates: boolean;
+    statePersistence: boolean;
   };
 }
 
@@ -68,6 +69,26 @@ export interface FocusMeasurementPayload {
   annotationId: string;
 }
 
+export interface MeasurementBinding {
+  annotationId: string;
+  rowId: string;
+  toolName: SupportedToolName;
+}
+
+export interface RestoreMeasurementsPayload {
+  targetViewerInstanceId: string;
+  measurements: MeasurementBinding[];
+}
+
+export interface RestoredMeasurement extends MeasurementBinding {
+  measurement: Measurement;
+}
+
+export interface MeasurementsRestoredPayload {
+  viewerInstanceId: string;
+  measurements: RestoredMeasurement[];
+}
+
 export interface MeasurementAddedPayload {
   viewerInstanceId: string;
   rowId: string;
@@ -95,9 +116,11 @@ export interface BridgePayloadByType {
   DEACTIVATE_TOOL: DeactivateToolPayload;
   FOCUS_MEASUREMENT: FocusMeasurementPayload;
   REMOVE_MEASUREMENT: RemoveMeasurementPayload;
+  RESTORE_MEASUREMENTS: RestoreMeasurementsPayload;
   MEASUREMENT_ADDED: MeasurementAddedPayload;
   MEASUREMENT_UPDATED: MeasurementUpdatedPayload;
   MEASUREMENT_REMOVED: MeasurementRemovedPayload;
+  MEASUREMENTS_RESTORED: MeasurementsRestoredPayload;
 }
 
 export interface BridgeMessageFor<TType extends BridgeMessageType> {
@@ -116,6 +139,7 @@ export type HostToViewerMessage =
   | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL>
   | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL>
   | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT>
-  | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT>;
+  | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.REMOVE_MEASUREMENT>
+  | BridgeMessageFor<typeof BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS>;
 
 export type ViewerToHostMessage = Exclude<BridgeMessage, HostToViewerMessage>;

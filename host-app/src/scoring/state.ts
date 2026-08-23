@@ -3,6 +3,7 @@ import {
   type Measurement,
   type MeasurementAddedPayload,
   type MeasurementRemovedPayload,
+  type MeasurementsRestoredPayload,
   type MeasurementUpdatedPayload,
   type SupportedToolName,
   type ViewerReadyPayload,
@@ -12,6 +13,7 @@ export type MeasurementRowStatus =
   | 'waiting'
   | 'queued'
   | 'drawing'
+  | 'restoring'
   | 'ready'
   | 'deleting'
   | 'error';
@@ -59,6 +61,7 @@ export type ScoringAction =
   | { type: 'measurementUpdated'; payload: MeasurementUpdatedPayload }
   | { type: 'deletionRequested'; annotationId: string; rowId: string }
   | { type: 'measurementRemoved'; payload: MeasurementRemovedPayload }
+  | { type: 'measurementsRestored'; payload: MeasurementsRestoredPayload }
   | { type: 'viewerLoading' }
   | { type: 'viewerReady'; payload: ViewerReadyPayload };
 
@@ -82,13 +85,15 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
     case 'viewerLoading':
       return {
         connection: { status: 'connecting' },
-        rows: resetCompletedRows(state.rows),
+        rows: prepareRowsForRestore(state.rows),
       };
 
     case 'viewerReady': {
       const changedViewerSession =
         state.connection.status === 'ready' &&
         state.connection.viewerInstanceId !== action.payload.viewerInstanceId;
+
+      const rows = changedViewerSession ? prepareRowsForRestore(state.rows) : state.rows;
 
       return {
         ...state,
@@ -98,7 +103,44 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
           viewerInstanceId: action.payload.viewerInstanceId,
           supportedTools: action.payload.supportedTools,
         },
-        rows: changedViewerSession ? resetCompletedRows(state.rows) : state.rows,
+        rows: action.payload.capabilities.statePersistence ? rows : resetRestoringRows(rows),
+      };
+    }
+
+    case 'measurementsRestored': {
+      if (
+        state.connection.status !== 'ready' ||
+        state.connection.viewerInstanceId !== action.payload.viewerInstanceId
+      ) {
+        return state;
+      }
+
+      const restoredByRowId = new Map(
+        action.payload.measurements.map(measurement => [measurement.rowId, measurement])
+      );
+
+      return {
+        ...state,
+        rows: state.rows.map(row => {
+          if (row.status !== 'restoring') {
+            return row;
+          }
+
+          const restored = restoredByRowId.get(row.id);
+
+          return restored &&
+            restored.annotationId === row.annotationId &&
+            restored.toolName === row.toolName &&
+            measurementMatchesTool(restored.measurement, row.toolName)
+            ? {
+                id: row.id,
+                status: 'ready',
+                annotationId: restored.annotationId,
+                measurement: restored.measurement,
+                toolName: row.toolName,
+              }
+            : { id: row.id, status: 'waiting', toolName: row.toolName };
+        }),
       };
     }
 
@@ -223,10 +265,19 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
   }
 }
 
-function resetCompletedRows(rows: MeasurementRow[]): MeasurementRow[] {
+function prepareRowsForRestore(rows: MeasurementRow[]): MeasurementRow[] {
   let changed = false;
   const resetRows = rows.map(row => {
-    if (row.status !== 'ready' && row.status !== 'deleting') {
+    if (
+      (row.status === 'ready' || row.status === 'deleting') &&
+      row.annotationId &&
+      row.measurement
+    ) {
+      changed = true;
+      return { ...row, status: 'restoring' } satisfies MeasurementRow;
+    }
+
+    if (row.status === 'waiting' || row.status === 'queued' || row.status === 'restoring') {
       return row;
     }
 
@@ -235,6 +286,20 @@ function resetCompletedRows(rows: MeasurementRow[]): MeasurementRow[] {
   });
 
   return changed ? resetRows : rows;
+}
+
+function resetRestoringRows(rows: MeasurementRow[]): MeasurementRow[] {
+  let changed = false;
+  const nextRows = rows.map(row => {
+    if (row.status !== 'restoring') {
+      return row;
+    }
+
+    changed = true;
+    return { id: row.id, status: 'waiting', toolName: row.toolName } satisfies MeasurementRow;
+  });
+
+  return changed ? nextRows : rows;
 }
 
 function updateMatchingActivation(

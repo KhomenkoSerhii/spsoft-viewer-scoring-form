@@ -21,12 +21,13 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the message contract and implementa
 - correlated activation, cancellation, creation, focus navigation, live updates, and deletion
 - automatic return to Pan after drawing or cancellation
 - separate area totals for `mm²`, `cm²`, `px²` and length totals for `mm`, `cm`, `px`
-- cleanup on iframe reload, mode exit, and React unmount
+- study-scoped restoration of form rows and correlated annotations after reload
+- cleanup on mode exit and React unmount
 - focused unit tests and two Playwright integration scenarios
 
-Optional tasks 5.1 (live updates), 5.2 (bidirectional deletion), 5.3 (focus navigation), and 5.4
-(Length measurements) are included. Viewport version labels and persistence after a full page
-reload are outside the current scope.
+Optional tasks 5.1 (live updates), 5.2 (bidirectional deletion), 5.3 (focus navigation), 5.4
+(Length measurements), and 5.6 (state restoration) are included. Viewport version labels remain
+outside the current scope.
 
 ## Prerequisites
 
@@ -105,6 +106,7 @@ The Viewer has a matching `spsoftViewerBridge.hostOrigin` entry in
 5. Select a completed form row to highlight its annotation and navigate to it in the Viewer.
 6. Drag an annotation handle to see its value and corresponding total update.
 7. Delete from the form to remove the annotation, or delete in OHIF to clear the linked row.
+8. Reload the page to restore completed rows, totals, and their correlated annotations.
 
 The displayed DICOM data comes from the public data source in the default OHIF configuration. No
 backend or local DICOM server is required.

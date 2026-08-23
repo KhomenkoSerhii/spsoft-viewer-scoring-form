@@ -5,7 +5,9 @@ import {
   measurementMatchesTool,
   parseBridgeMessage,
   type MeasurementAddedPayload,
+  type MeasurementBinding,
   type MeasurementRemovedPayload,
+  type MeasurementsRestoredPayload,
   type MeasurementUpdatedPayload,
   type SupportedToolName,
   type ViewerReadyPayload,
@@ -50,6 +52,7 @@ export interface HostBridgeCallbacks {
   onActivationSent(request: ActivationRequest): void;
   onMeasurementAdded(payload: MeasurementAddedPayload): void;
   onMeasurementRemoved(payload: MeasurementRemovedPayload): void;
+  onMeasurementsRestored(payload: MeasurementsRestoredPayload): void;
   onMeasurementUpdated(payload: MeasurementUpdatedPayload): void;
   onViewerLoading(): void;
   onViewerReady(payload: ViewerReadyPayload): void;
@@ -58,6 +61,7 @@ export interface HostBridgeCallbacks {
 export interface HostBridgeControllerOptions {
   callbacks: HostBridgeCallbacks;
   createId: () => string;
+  getRestorableMeasurements: () => MeasurementBinding[];
   getViewerWindow: () => ViewerMessageWindow | null;
   hostWindow: HostMessageWindow;
   viewerOrigin: string;
@@ -67,6 +71,7 @@ export class HostBridgeController {
   private readonly callbacks: HostBridgeCallbacks;
   private readonly createId: () => string;
   private readonly getViewerWindow: () => ViewerMessageWindow | null;
+  private readonly getRestorableMeasurements: () => MeasurementBinding[];
   private readonly hostWindow: HostMessageWindow;
   private readonly viewerOrigin: string;
   private activeRequest: ActivationRequest | null = null;
@@ -76,12 +81,14 @@ export class HostBridgeController {
   private readonly pendingRemovalAnnotationIds = new Set<string>();
   private installed = false;
   private pendingRequest: ActivationRequest | null = null;
+  private pendingRestoration = new Map<string, MeasurementBinding>();
   private viewerSession: ViewerReadyPayload | null = null;
 
   constructor(options: HostBridgeControllerOptions) {
     this.callbacks = options.callbacks;
     this.createId = options.createId;
     this.getViewerWindow = options.getViewerWindow;
+    this.getRestorableMeasurements = options.getRestorableMeasurements;
     this.hostWindow = options.hostWindow;
     this.viewerOrigin = options.viewerOrigin;
   }
@@ -219,6 +226,7 @@ export class HostBridgeController {
     this.toolNamesByAnnotationId.clear();
     this.acceptedMessageIds.clear();
     this.pendingRemovalAnnotationIds.clear();
+    this.pendingRestoration.clear();
     this.callbacks.onViewerLoading();
   }
 
@@ -234,6 +242,7 @@ export class HostBridgeController {
     this.toolNamesByAnnotationId.clear();
     this.acceptedMessageIds.clear();
     this.pendingRemovalAnnotationIds.clear();
+    this.pendingRestoration.clear();
 
     if (!this.installed) {
       return;
@@ -271,6 +280,11 @@ export class HostBridgeController {
       return;
     }
 
+    if (message.type === BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED) {
+      this.acceptRestoredMeasurements(message.messageId, message.payload);
+      return;
+    }
+
     if (message.type !== BRIDGE_MESSAGE_TYPES.VIEWER_READY) {
       return;
     }
@@ -282,6 +296,7 @@ export class HostBridgeController {
       this.toolNamesByAnnotationId.clear();
       this.acceptedMessageIds.clear();
       this.pendingRemovalAnnotationIds.clear();
+      this.pendingRestoration.clear();
     }
 
     if (
@@ -296,8 +311,47 @@ export class HostBridgeController {
 
     this.viewerSession = message.payload;
     this.callbacks.onViewerReady(message.payload);
+    this.requestRestoration();
     this.flushPendingActivation();
   };
+
+  private acceptRestoredMeasurements(
+    messageId: string,
+    payload: MeasurementsRestoredPayload
+  ): void {
+    if (
+      this.acceptedMessageIds.has(messageId) ||
+      payload.viewerInstanceId !== this.viewerSession?.viewerInstanceId ||
+      !this.viewerSession.capabilities.statePersistence
+    ) {
+      return;
+    }
+
+    const accepted = payload.measurements.filter(restored => {
+      const expected = this.pendingRestoration.get(restored.annotationId);
+
+      return (
+        expected?.rowId === restored.rowId &&
+        expected.toolName === restored.toolName &&
+        measurementMatchesTool(restored.measurement, restored.toolName)
+      );
+    });
+
+    this.rememberAcceptedMessageId(messageId);
+    this.rowIdsByAnnotationId.clear();
+    this.toolNamesByAnnotationId.clear();
+
+    for (const restored of accepted) {
+      this.rowIdsByAnnotationId.set(restored.annotationId, restored.rowId);
+      this.toolNamesByAnnotationId.set(restored.annotationId, restored.toolName);
+    }
+
+    this.pendingRestoration.clear();
+    this.callbacks.onMeasurementsRestored({
+      viewerInstanceId: payload.viewerInstanceId,
+      measurements: accepted,
+    });
+  }
 
   private acceptMeasurement(messageId: string, payload: MeasurementAddedPayload): void {
     const activeRequest = this.activeRequest;
@@ -365,6 +419,45 @@ export class HostBridgeController {
 
     if (typeof oldestMessageId === 'string') {
       this.acceptedMessageIds.delete(oldestMessageId);
+    }
+  }
+
+  private requestRestoration(): void {
+    const viewerSession = this.viewerSession;
+    const viewerWindow = this.getViewerWindow();
+    const measurements = this.getRestorableMeasurements();
+
+    this.pendingRestoration.clear();
+
+    if (!viewerSession?.capabilities.statePersistence || !viewerWindow) {
+      this.callbacks.onMeasurementsRestored({
+        viewerInstanceId: viewerSession?.viewerInstanceId ?? '',
+        measurements: [],
+      });
+      return;
+    }
+
+    for (const measurement of measurements) {
+      this.pendingRestoration.set(measurement.annotationId, measurement);
+    }
+
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+      {
+        targetViewerInstanceId: viewerSession.viewerInstanceId,
+        measurements,
+      },
+      this.createId()
+    );
+
+    try {
+      viewerWindow.postMessage(message, this.viewerOrigin);
+    } catch {
+      this.pendingRestoration.clear();
+      this.callbacks.onMeasurementsRestored({
+        viewerInstanceId: viewerSession.viewerInstanceId,
+        measurements: [],
+      });
     }
   }
 
