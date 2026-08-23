@@ -4,6 +4,7 @@ import { pluginNodePolyfill } from '@rsbuild/plugin-node-polyfill';
 import path from 'path';
 import writePluginImportsFile from './platform/app/.webpack/writePluginImportsFile';
 import fs from 'fs';
+import viewerPackage from './platform/app/package.json';
 
 const SRC_DIR = path.resolve(__dirname, './platform/app/src');
 const DIST_DIR = path.resolve(__dirname, './platform/app/dist');
@@ -17,6 +18,7 @@ const PUBLIC_URL = process.env.PUBLIC_URL || '/';
 const NODE_ENV = process.env.NODE_ENV;
 const BUILD_NUM = process.env.CIRCLE_BUILD_NUM || '0';
 const VERSION_NUMBER = fs.readFileSync(path.join(__dirname, './version.txt'), 'utf8') || '';
+const OHIF_VERSION = viewerPackage.version;
 const COMMIT_HASH = fs.readFileSync(path.join(__dirname, './commit.txt'), 'utf8') || '';
 const PROXY_TARGET = process.env.PROXY_TARGET;
 const PROXY_DOMAIN = process.env.PROXY_DOMAIN;
@@ -39,6 +41,7 @@ export default defineConfig({
       'process.env.PUBLIC_URL': JSON.stringify(process.env.PUBLIC_URL || '/'),
       'process.env.BUILD_NUM': JSON.stringify(BUILD_NUM),
       'process.env.VERSION_NUMBER': JSON.stringify(VERSION_NUMBER),
+      'process.env.OHIF_VERSION': JSON.stringify(OHIF_VERSION),
       'process.env.COMMIT_HASH': JSON.stringify(COMMIT_HASH),
       'process.env.USE_LOCIZE': JSON.stringify(process.env.USE_LOCIZE || ''),
       'process.env.LOCIZE_PROJECTID': JSON.stringify(process.env.LOCIZE_PROJECTID || ''),
