@@ -53,6 +53,7 @@ describe('parseBridgeMessage', () => {
           measurementDeletion: true,
           measurementFocus: true,
           measurementUpdates: true,
+          statePersistence: false,
         },
       },
       'message-ready'
@@ -96,6 +97,14 @@ describe('parseBridgeMessage', () => {
       'message-remove'
     ),
     createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+      {
+        targetViewerInstanceId: 'viewer-1',
+        measurements: [{ annotationId: 'annotation-1', rowId: 'row-1', toolName: 'EllipticalROI' }],
+      },
+      'message-restore'
+    ),
+    createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
       {
         viewerInstanceId: 'viewer-1',
@@ -136,11 +145,26 @@ describe('parseBridgeMessage', () => {
       },
       'message-removed'
     ),
+    createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+      {
+        viewerInstanceId: 'viewer-1',
+        measurements: [
+          {
+            annotationId: 'annotation-1',
+            rowId: 'row-1',
+            toolName: 'EllipticalROI',
+            measurement: areaMeasurement,
+          },
+        ],
+      },
+      'message-restored'
+    ),
   ])('accepts $type', message => {
     expect(parseBridgeMessage(message)).toEqual(message);
   });
 
-  it('defaults an omitted additive focus capability to false', () => {
+  it('defaults omitted additive capabilities to false', () => {
     expect(
       parseBridgeMessage({
         channel: BRIDGE_CHANNEL,
@@ -168,9 +192,42 @@ describe('parseBridgeMessage', () => {
           measurementDeletion: true,
           measurementFocus: false,
           measurementUpdates: true,
+          statePersistence: false,
         },
       },
     });
+  });
+
+  it('rejects duplicate and mismatched restoration entries', () => {
+    const duplicateBindings = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+      {
+        targetViewerInstanceId: 'viewer-1',
+        measurements: [
+          { annotationId: 'annotation-1', rowId: 'row-1', toolName: 'EllipticalROI' },
+          { annotationId: 'annotation-1', rowId: 'row-2', toolName: 'EllipticalROI' },
+        ],
+      },
+      'duplicate-bindings'
+    );
+    const mismatchedMeasurement = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+      {
+        viewerInstanceId: 'viewer-1',
+        measurements: [
+          {
+            annotationId: 'annotation-1',
+            rowId: 'row-1',
+            toolName: 'Length',
+            measurement: areaMeasurement,
+          },
+        ],
+      },
+      'mismatched-measurement'
+    );
+
+    expect(parseBridgeMessage(duplicateBindings)).toBeNull();
+    expect(parseBridgeMessage(mismatchedMeasurement)).toBeNull();
   });
 
   it('rejects a non-boolean focus capability', () => {
@@ -209,6 +266,7 @@ describe('parseBridgeMessage', () => {
           measurementDeletion: false,
           measurementFocus: false,
           measurementUpdates: false,
+          statePersistence: false,
         },
       },
       'message-1'

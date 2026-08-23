@@ -16,6 +16,11 @@ import {
   type MeasurementRowStatus,
   type ScoringState,
 } from './scoring/state';
+import {
+  getRestorableMeasurementBindings,
+  loadPersistedRows,
+  savePersistedRows,
+} from './scoring/persistence';
 import { calculateAreaTotals, calculateLengthTotals } from './scoring/totals';
 
 const DEFAULT_VIEWER_STUDY_UID = '1.3.6.1.4.1.25403.345050719074.3824.20170125095438.5';
@@ -59,6 +64,7 @@ const statusCopy: Record<MeasurementRowStatus, { label: string; description: str
   waiting: { label: 'Очікує', description: 'Готове до активації' },
   queued: { label: 'У черзі', description: 'Очікуємо готовність Viewer' },
   drawing: { label: 'Малювання…', description: 'Завершіть вимірювання у Viewer' },
+  restoring: { label: 'Відновлення…', description: 'Відновлюємо анотацію у Viewer' },
   ready: { label: 'Готово', description: 'Вимірювання отримано' },
   deleting: { label: 'Видалення…', description: 'Очікуємо підтвердження від Viewer' },
   error: { label: 'Помилка', description: 'Не вдалося активувати інструмент' },
@@ -192,7 +198,15 @@ function MeasurementRowItem({
         <p>{errorDescription}</p>
       </div>
 
-      {row.status === 'deleting' ? (
+      {row.status === 'restoring' ? (
+        <button
+          className="measurement-row__button"
+          type="button"
+          disabled
+        >
+          Відновлення…
+        </button>
+      ) : row.status === 'deleting' ? (
         <button
           className="measurement-row__button measurement-row__button--delete"
           type="button"
@@ -391,10 +405,19 @@ function outcomeForReducer(result: ActivationResult) {
 }
 
 export function App() {
-  const [state, dispatch] = useReducer(scoringReducer, initialScoringState);
+  const [state, dispatch] = useReducer(scoringReducer, initialScoringState, initialState => ({
+    ...initialState,
+    rows: loadPersistedRows(window.localStorage, viewerStudyUid),
+  }));
   const [bridgeInstalled, setBridgeInstalled] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const bridgeRef = useRef<HostBridgeController | null>(null);
+  const rowsRef = useRef(state.rows);
+  rowsRef.current = state.rows;
+
+  useEffect(() => {
+    savePersistedRows(window.localStorage, viewerStudyUid, state.rows);
+  }, [state.rows]);
 
   useEffect(() => {
     const bridge = new HostBridgeController({
@@ -410,9 +433,11 @@ export function App() {
         onActivationReset: request => dispatch({ type: 'activationReset', ...request }),
         onMeasurementAdded: payload => dispatch({ type: 'measurementReceived', payload }),
         onMeasurementRemoved: payload => dispatch({ type: 'measurementRemoved', payload }),
+        onMeasurementsRestored: payload => dispatch({ type: 'measurementsRestored', payload }),
         onMeasurementUpdated: payload => dispatch({ type: 'measurementUpdated', payload }),
         onViewerLoading: () => dispatch({ type: 'viewerLoading' }),
       },
+      getRestorableMeasurements: () => getRestorableMeasurementBindings(rowsRef.current),
     });
 
     bridgeRef.current = bridge;

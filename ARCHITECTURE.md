@@ -37,9 +37,10 @@ interface BridgeMessage {
 
 `channel` prevents unrelated `message` traffic from reaching bridge logic. `version` gives the
 parser an explicit compatibility boundary. Version 1 includes the core flow and the additive focus,
-live update, and deletion messages. An older Viewer may omit `capabilities.measurementFocus`; the
-parser normalizes that omission to `false`, while still rejecting a non-boolean value. A future
-incompatible payload change would require a new version.
+live update, deletion, and persistence messages. An older Viewer may omit
+`capabilities.measurementFocus` or `capabilities.statePersistence`; the parser normalizes either
+omission to `false`, while still rejecting a non-boolean value. A future incompatible payload
+change would require a new version.
 
 Each sender creates a fresh `messageId` with `crypto.randomUUID()`. The host remembers accepted
 Viewer message IDs for the current session and ignores duplicates.
@@ -48,14 +49,16 @@ Viewer message IDs for the current session and ignores duplicates.
 
 | Direction | Type | Payload | Purpose |
 | --- | --- | --- | --- |
-| Viewer to host | `VIEWER_READY` | `viewerInstanceId`, `supportedTools`, `capabilities.measurementUpdates`, `capabilities.measurementDeletion`, `capabilities.measurementFocus` | Announces a ready Viewer session and its supported behavior. |
+| Viewer to host | `VIEWER_READY` | `viewerInstanceId`, `supportedTools`, capability flags | Announces a ready Viewer session and its supported behavior. |
 | Host to Viewer | `ACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `toolName` | Arms `EllipticalROI` or `Length` for one typed form row. |
 | Host to Viewer | `DEACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `reason` | Cancels the matching activation and restores Pan. |
 | Host to Viewer | `FOCUS_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Selects a correlated annotation and navigates the Viewer to it. |
 | Host to Viewer | `REMOVE_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Removes one correlated OHIF measurement. |
+| Host to Viewer | `RESTORE_MEASUREMENTS` | `targetViewerInstanceId`, expected `rowId`/`annotationId`/`toolName` bindings | Requests restoration of only the records still owned by the form. |
 | Viewer to host | `MEASUREMENT_ADDED` | `viewerInstanceId`, `rowId`, `activationId`, `annotationId`, `measurement` | Completes the active row with a newly created annotation. |
 | Viewer to host | `MEASUREMENT_UPDATED` | `viewerInstanceId`, `rowId`, `annotationId`, `measurement` | Updates the value after a correlated annotation changes. |
 | Viewer to host | `MEASUREMENT_REMOVED` | `viewerInstanceId`, `rowId`, `annotationId` | Confirms removal or reports deletion initiated in OHIF. |
+| Viewer to host | `MEASUREMENTS_RESTORED` | `viewerInstanceId`, restored bindings and measurements | Confirms which persisted annotations were recreated in OHIF. |
 
 `toolName` allows `EllipticalROI` and `Length`. `reason` is `user-cancelled`, `superseded`, or
 `host-unmounted`. `supportedTools` contains only the tools present in the active OHIF tool group
@@ -196,17 +199,41 @@ Checking `event.origin` blocks another origin. Checking `event.source` also bloc
 window served from an otherwise allowed origin. If two host tabs are open, each tab accepts events
 only from its own iframe.
 
-## Reload and cleanup
+## Reload, persistence, and cleanup
 
-Iframe load starts a new handshake. The host clears the old Viewer session, message IDs,
-annotation bindings, and pending deletions. Completed rows return to `waiting` because the new
-Viewer session does not own their old annotations.
+The two applications have different origins, so each owns a versioned, study-scoped local storage
+record. The host stores row order, row type, normalized measurement, and correlation IDs. The
+Viewer stores only annotations created through the bridge, including their Cornerstone geometry.
+Transient `queued`/`drawing` states are never persisted as completed measurements.
+
+Iframe load starts a new handshake. The host clears the old in-memory session and moves completed
+rows to `restoring`. After a persistent Viewer announces readiness, the host sends
+`RESTORE_MEASUREMENTS` with the bindings it still owns. The Viewer intersects that request with its
+validated storage, re-adds matching annotations through Cornerstone annotation state, confirms the
+measurements through OHIF `MeasurementService`, and replies with `MEASUREMENTS_RESTORED`. Only then
+does the host return matching rows to `ready` and rebuild both sides' correlation maps. Missing
+records become waiting rows; Viewer records not requested by the host are removed. This
+host-authoritative intersection prevents stale or unrelated annotations from reappearing.
+If the Viewer advertises persistence but does not confirm restoration within five seconds, the host
+also returns affected rows to `waiting` instead of leaving the form blocked in `restoring`.
+
+Storage parsing is defensive: the version, study UID, bounded record count, unique IDs, supported
+tool, normalized measurement, referenced image, frame of reference, and finite handle coordinates
+must all be valid. Storage failures leave the in-memory workflow usable. A Viewer without the
+additive persistence capability falls back to waiting rows.
 
 On React unmount, the host removes its listener and deactivates an armed tool when possible. On
 OHIF mode exit, the bridge restores Pan, removes the window listener, unsubscribes from OHIF
 services, cancels readiness timers, and clears its in-memory maps.
 
-Form and annotation state are intentionally in memory. A full page reload does not restore them.
+Both iframe reload and full page reload restore completed form rows and their correlated
+annotations for the current study. Waiting rows are also retained in the form.
+
+These browser records have no application-defined expiry and are not uploaded to a backend. They
+remain on each origin until the user deletes the corresponding rows, clears site data, or the
+browser evicts local storage. A production clinical deployment would need an explicit retention
+policy and server-side controls for authentication, authorization, encryption, and auditability;
+this browser-only persistence is limited to the test task.
 
 ## Units and totals
 
@@ -230,15 +257,15 @@ consistent with the annotation still visible in OHIF.
   IDs because it creates the measurements.
 - `useReducer` is enough for the local form state. There is no server state that would justify
   TanStack Query, and the workflow does not require Redux or sagas.
-- Correlation state is session-scoped in memory. This keeps stale events out of the current form,
-  while persistent recovery remains a separate optional feature.
+- Active correlation maps remain session-scoped in memory and are rebuilt only from the validated
+  host/Viewer persistence handshake. Stale stored data cannot directly become an active binding.
 
 ## Test scope
 
 The focused Jest projects cover protocol parsing and units, both tool types, bridge behavior,
 reducer transitions, and separate totals. Playwright exercises the two-origin flow with a real OHIF
 runtime, including Ellipse and Length creation, early activation, focus navigation, live updates,
-deletion in both directions, malformed messages, and iframe reload.
+deletion in both directions, malformed messages, iframe reload, and full-page state restoration.
 
 The assignment does not require tests for the full OHIF monorepo, so `yarn test:spsoft` runs only
 the added SPSoft packages and integration scenarios.

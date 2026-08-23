@@ -41,5 +41,12 @@ correlated `REMOVE_MEASUREMENT` command removes the OHIF measurement; the result
 is returned as `MEASUREMENT_REMOVED`. Deletion initiated directly in OHIF uses the same event path.
 Events and commands for annotations that were not created through the bridge are ignored.
 
+Correlated annotations are stored as validated, versioned Cornerstone snapshots scoped to the
+current `StudyInstanceUIDs` query value. After `VIEWER_READY`, `RESTORE_MEASUREMENTS` supplies the
+bindings still owned by the host. The bridge re-adds only their matching geometry, verifies that
+OHIF `MeasurementService` recreated each measurement, replies with `MEASUREMENTS_RESTORED`, and
+discards stale Viewer-only records. This also rebuilds focus, update, and deletion correlation for
+the new Viewer session.
+
 Mode exit restores Pan, removes the window listener, unsubscribes from OHIF services, cancels
 readiness retries, and clears session bindings.

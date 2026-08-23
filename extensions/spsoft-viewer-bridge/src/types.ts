@@ -31,6 +31,12 @@ export interface MeasurementService extends BridgeEventService {
   remove(measurementId: string): void;
 }
 
+export interface AnnotationRepository {
+  add(annotation: Record<string, unknown>): string;
+  get(annotationId: string): Record<string, unknown> | undefined;
+  remove(annotationId: string): void;
+}
+
 export interface ViewerBridgeServices {
   measurementService: MeasurementService;
   viewportGridService: ViewportGridService;

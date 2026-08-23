@@ -4,12 +4,14 @@ import {
   BRIDGE_VERSION,
   createBridgeMessage,
   parseBridgeMessage,
+  type MeasurementBinding,
   type Measurement,
   type SupportedToolName,
 } from '@spsoft/viewer-protocol';
 
 import {
   HostBridgeController,
+  RESTORATION_TIMEOUT_MS,
   type ActivationRequest,
   type HostMessageWindow,
   type ViewerMessageWindow,
@@ -49,7 +51,7 @@ class FakeViewerWindow implements ViewerMessageWindow {
   }
 }
 
-function createHarness() {
+function createHarness(restorableMeasurements: MeasurementBinding[] = []) {
   const hostWindow = new FakeHostWindow();
   const viewerWindow = new FakeViewerWindow();
   const ids = ['activate-message', 'deactivate-message', 'dispose-message'];
@@ -59,6 +61,7 @@ function createHarness() {
     onActivationSent: jest.fn(),
     onMeasurementAdded: jest.fn(),
     onMeasurementRemoved: jest.fn(),
+    onMeasurementsRestored: jest.fn(),
     onMeasurementUpdated: jest.fn(),
     onViewerLoading: jest.fn(),
     onViewerReady: jest.fn(),
@@ -66,6 +69,7 @@ function createHarness() {
   const controller = new HostBridgeController({
     callbacks,
     createId: () => ids.shift() ?? 'fallback-message',
+    getRestorableMeasurements: () => restorableMeasurements,
     getViewerWindow: () => viewerWindow,
     hostWindow,
     viewerOrigin: 'http://localhost:3000',
@@ -78,12 +82,14 @@ function createHarness() {
   const announceReady = ({
     measurementDeletion = true,
     measurementFocus = true,
+    statePersistence = false,
     source = viewerWindow,
     supportedTools = ['EllipticalROI'] as const,
     viewerInstanceId = 'viewer-1',
   }: {
     measurementDeletion?: boolean;
     measurementFocus?: boolean;
+    statePersistence?: boolean;
     source?: ViewerMessageWindow;
     supportedTools?: readonly SupportedToolName[];
     viewerInstanceId?: string;
@@ -94,7 +100,12 @@ function createHarness() {
         {
           viewerInstanceId,
           supportedTools: [...supportedTools],
-          capabilities: { measurementDeletion, measurementFocus, measurementUpdates: true },
+          capabilities: {
+            measurementDeletion,
+            measurementFocus,
+            measurementUpdates: true,
+            statePersistence,
+          },
         },
         `ready-${viewerInstanceId}`
       ),
@@ -220,6 +231,7 @@ describe('HostBridgeController', () => {
             measurementDeletion: false,
             measurementFocus: false,
             measurementUpdates: false,
+            statePersistence: false,
           },
         },
         'attacker-message'
@@ -266,6 +278,92 @@ describe('HostBridgeController', () => {
     );
     expect(controller.activate(activation)).toBe('sent');
     expect(viewerWindow.postedMessages).toHaveLength(1);
+  });
+
+  it('requests persisted bindings and accepts only the correlated restored measurements', () => {
+    const binding = {
+      annotationId: 'annotation-restored',
+      rowId: 'row-restored',
+      toolName: 'EllipticalROI',
+    } as const;
+    const { announceReady, callbacks, controller, hostWindow, viewerWindow } = createHarness([
+      binding,
+    ]);
+    controller.install();
+
+    announceReady({ statePersistence: true });
+
+    expect(parseBridgeMessage(viewerWindow.postedMessages[0]?.message)).toEqual(
+      expect.objectContaining({
+        type: BRIDGE_MESSAGE_TYPES.RESTORE_MEASUREMENTS,
+        payload: {
+          targetViewerInstanceId: 'viewer-1',
+          measurements: [binding],
+        },
+      })
+    );
+
+    hostWindow.dispatch(
+      createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.MEASUREMENTS_RESTORED,
+        {
+          viewerInstanceId: 'viewer-1',
+          measurements: [
+            {
+              ...binding,
+              measurement: { kind: 'area', value: 20, unit: 'mm2', rawUnit: 'mm²' },
+            },
+            {
+              annotationId: 'annotation-unrequested',
+              rowId: 'row-unrequested',
+              toolName: 'Length',
+              measurement: { kind: 'length', value: 10, unit: 'mm', rawUnit: 'mm' },
+            },
+          ],
+        },
+        'restored-message'
+      ),
+      'http://localhost:3000',
+      viewerWindow
+    );
+
+    expect(callbacks.onMeasurementsRestored).toHaveBeenLastCalledWith({
+      viewerInstanceId: 'viewer-1',
+      measurements: [
+        {
+          ...binding,
+          measurement: { kind: 'area', value: 20, unit: 'mm2', rawUnit: 'mm²' },
+        },
+      ],
+    });
+    expect(controller.focusMeasurement(binding)).toBe('sent');
+  });
+
+  it('falls back from restoring when a persistent Viewer does not confirm the request', () => {
+    jest.useFakeTimers();
+    const binding = {
+      annotationId: 'annotation-restored',
+      rowId: 'row-restored',
+      toolName: 'EllipticalROI',
+    } as const;
+    const { announceReady, callbacks, controller } = createHarness([binding]);
+
+    try {
+      controller.install();
+      announceReady({ statePersistence: true });
+
+      expect(callbacks.onMeasurementsRestored).not.toHaveBeenCalled();
+      jest.advanceTimersByTime(RESTORATION_TIMEOUT_MS);
+
+      expect(callbacks.onMeasurementsRestored).toHaveBeenCalledTimes(1);
+      expect(callbacks.onMeasurementsRestored).toHaveBeenCalledWith({
+        viewerInstanceId: 'viewer-1',
+        measurements: [],
+      });
+    } finally {
+      controller.dispose();
+      jest.useRealTimers();
+    }
   });
 
   it('queues activation before handshake and flushes it after VIEWER_READY', () => {
