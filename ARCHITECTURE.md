@@ -49,17 +49,17 @@ Viewer message IDs for the current session and ignores duplicates.
 | Direction | Type | Payload | Purpose |
 | --- | --- | --- | --- |
 | Viewer to host | `VIEWER_READY` | `viewerInstanceId`, `supportedTools`, `capabilities.measurementUpdates`, `capabilities.measurementDeletion`, `capabilities.measurementFocus` | Announces a ready Viewer session and its supported behavior. |
-| Host to Viewer | `ACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `toolName` | Arms `EllipticalROI` for one form row. |
+| Host to Viewer | `ACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `toolName` | Arms `EllipticalROI` or `Length` for one typed form row. |
 | Host to Viewer | `DEACTIVATE_TOOL` | `targetViewerInstanceId`, `rowId`, `activationId`, `reason` | Cancels the matching activation and restores Pan. |
 | Host to Viewer | `FOCUS_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Selects a correlated annotation and navigates the Viewer to it. |
 | Host to Viewer | `REMOVE_MEASUREMENT` | `targetViewerInstanceId`, `rowId`, `annotationId` | Removes one correlated OHIF measurement. |
 | Viewer to host | `MEASUREMENT_ADDED` | `viewerInstanceId`, `rowId`, `activationId`, `annotationId`, `measurement` | Completes the active row with a newly created annotation. |
-| Viewer to host | `MEASUREMENT_UPDATED` | `viewerInstanceId`, `rowId`, `annotationId`, `measurement` | Updates the value after an ellipse handle moves. |
+| Viewer to host | `MEASUREMENT_UPDATED` | `viewerInstanceId`, `rowId`, `annotationId`, `measurement` | Updates the value after a correlated annotation changes. |
 | Viewer to host | `MEASUREMENT_REMOVED` | `viewerInstanceId`, `rowId`, `annotationId` | Confirms removal or reports deletion initiated in OHIF. |
 
-`toolName` currently allows only `EllipticalROI`. `reason` is `user-cancelled`, `superseded`, or
-`host-unmounted`. `supportedTools` may be empty when the active OHIF tool group does not contain
-the ellipse tool.
+`toolName` allows `EllipticalROI` and `Length`. `reason` is `user-cancelled`, `superseded`, or
+`host-unmounted`. `supportedTools` contains only the tools present in the active OHIF tool group
+and may be empty.
 
 `measurement` has this shape:
 
@@ -71,11 +71,22 @@ interface AreaMeasurement {
   rawUnit: string;
   calibrationType?: string;
 }
+
+interface LengthMeasurement {
+  kind: 'length';
+  value: number;
+  unit: 'mm' | 'cm' | 'px' | 'unknown';
+  rawUnit: string;
+  calibrationType?: string;
+}
+
+type Measurement = AreaMeasurement | LengthMeasurement;
 ```
 
 The runtime parser rejects unknown message types, invalid enum values, empty IDs, negative or
-non-finite areas, and inconsistent normalized units. TypeScript types alone are not used as input
-validation because `MessageEvent.data` is untrusted at runtime.
+non-finite values, and inconsistent normalized units. TypeScript types alone are not used as input
+validation because `MessageEvent.data` is untrusted at runtime. The host and Viewer also verify
+that `area` belongs to an `EllipticalROI` activation and `length` belongs to a `Length` activation.
 
 ## Identifier ownership and correlation
 
@@ -89,8 +100,8 @@ validation because `MessageEvent.data` is untrusted at runtime.
 
 The host creates `rowId` when a row is added and creates `activationId` for every activation. The
 Viewer returns both values with `MEASUREMENT_ADDED`, together with the OHIF `annotationId`. After
-acceptance, both sides keep an in-memory `annotationId -> rowId` map for the current Viewer
-session.
+acceptance, both sides keep in-memory `annotationId -> rowId` and `annotationId -> toolName` maps
+for the current Viewer session.
 
 The host accepts a creation only when all of these values match the active request. Updates and
 removals must match the current `viewerInstanceId` and the stored annotation-to-row binding.
@@ -116,8 +127,8 @@ sequenceDiagram
   Viewer-->>Host: VIEWER_READY
   User->>Host: activate row
   Host->>Viewer: ACTIVATE_TOOL
-  Viewer->>OHIF: set EllipticalROI active
-  User->>OHIF: draw ellipse
+  Viewer->>OHIF: set requested tool active
+  User->>OHIF: draw ellipse or length
   OHIF-->>Viewer: MEASUREMENT_ADDED
   Viewer-->>Host: MEASUREMENT_ADDED
   Viewer->>OHIF: restore Pan
@@ -134,11 +145,11 @@ previous session.
 ## Measurement lifecycle
 
 1. The host moves a row from `waiting` to `queued` or `drawing`.
-2. The Viewer activates `EllipticalROI` through `commandsManager` and records the row and activation
-   IDs as the armed request.
-3. `MeasurementService` emits an add or update event. The bridge reads the completed area from
-   OHIF measurement data. If cached statistics are not ready on the first add event, it waits for
-   the matching update.
+2. The Viewer activates the row's `EllipticalROI` or `Length` tool through `commandsManager` and
+   records the row, activation ID, and expected tool as the armed request.
+3. `MeasurementService` emits an add or update event. The bridge reads either `area`/`areaUnit` or
+   `length`/`unit` from OHIF measurement data. If cached statistics are not ready on the first add
+   event, it waits for the matching update.
 4. The Viewer stores the annotation-to-row binding, sends `MEASUREMENT_ADDED`, and restores Pan.
 5. The host checks the active request, session, IDs, and duplicate set before moving the row to
    `ready`.
@@ -199,10 +210,11 @@ Form and annotation state are intentionally in memory. A full page reload does n
 
 ## Units and totals
 
-The bridge preserves the exact OHIF `areaUnit` as `rawUnit` and also derives a canonical unit.
-`mm²`, `cm²`, and `px²` are never combined. Measurements with an unknown unit are grouped only
-when their normalized raw labels match. The form stores the numeric value unchanged and applies
-Ukrainian number formatting only while rendering.
+The bridge preserves the exact OHIF unit as `rawUnit` and also derives a canonical unit. Area totals
+(`mm²`, `cm²`, `px²`) and length totals (`mm`, `cm`, `px`) are derived independently and never
+combined with each other. Physical and pixel units also remain separate. Measurements with an
+unknown unit are grouped only when their normalized raw labels match. The form stores the numeric
+value unchanged and applies Ukrainian number formatting only while rendering.
 
 The footer derives totals from rows in `ready` or confirmation-pending `deleting` state. A
 form-initiated deletion stays in the total until Viewer confirmation, which keeps the form
@@ -223,10 +235,10 @@ consistent with the annotation still visible in OHIF.
 
 ## Test scope
 
-The focused Jest projects cover protocol parsing and units, bridge behavior, reducer transitions,
-and totals. Playwright exercises the two-origin flow with a real OHIF runtime, including early
-activation, focus navigation, live updates, deletion in both directions, malformed messages, and
-iframe reload.
+The focused Jest projects cover protocol parsing and units, both tool types, bridge behavior,
+reducer transitions, and separate totals. Playwright exercises the two-origin flow with a real OHIF
+runtime, including Ellipse and Length creation, early activation, focus navigation, live updates,
+deletion in both directions, malformed messages, and iframe reload.
 
 The assignment does not require tests for the full OHIF monorepo, so `yarn test:spsoft` runs only
 the added SPSoft packages and integration scenarios.

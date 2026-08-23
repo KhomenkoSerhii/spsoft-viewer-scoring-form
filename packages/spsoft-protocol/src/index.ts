@@ -4,16 +4,25 @@ export {
   BRIDGE_MESSAGE_TYPES,
   BRIDGE_VERSION,
   DEACTIVATION_REASONS,
+  LENGTH_UNITS,
   SUPPORTED_TOOLS,
 } from './constants';
 export { createBridgeMessage } from './createBridgeMessage';
+export { measurementMatchesTool } from './measurements';
 export {
   isHostToViewerMessage,
   isViewerToHostMessage,
   parseBridgeMessage,
 } from './parseBridgeMessage';
-export { createAreaMeasurement, getAreaAggregationKey, normalizeAreaUnit } from './units';
-export type { NormalizedAreaUnit } from './units';
+export {
+  createAreaMeasurement,
+  createLengthMeasurement,
+  getAreaAggregationKey,
+  getLengthAggregationKey,
+  normalizeAreaUnit,
+  normalizeLengthUnit,
+} from './units';
+export type { NormalizedAreaUnit, NormalizedLengthUnit } from './units';
 export type {
   ActivateToolPayload,
   AreaMeasurement,
@@ -26,6 +35,9 @@ export type {
   DeactivationReason,
   FocusMeasurementPayload,
   HostToViewerMessage,
+  LengthMeasurement,
+  LengthUnit,
+  Measurement,
   MeasurementAddedPayload,
   MeasurementRemovedPayload,
   MeasurementUpdatedPayload,

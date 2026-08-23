@@ -4,6 +4,7 @@ import {
   BRIDGE_MESSAGE_TYPES,
   BRIDGE_VERSION,
   DEACTIVATION_REASONS,
+  LENGTH_UNITS,
   SUPPORTED_TOOLS,
 } from './constants';
 import type {
@@ -13,6 +14,8 @@ import type {
   DeactivateToolPayload,
   FocusMeasurementPayload,
   HostToViewerMessage,
+  LengthMeasurement,
+  Measurement,
   MeasurementAddedPayload,
   MeasurementRemovedPayload,
   MeasurementUpdatedPayload,
@@ -21,7 +24,7 @@ import type {
   ViewerReadyPayload,
   ViewerToHostMessage,
 } from './types';
-import { normalizeAreaUnit } from './units';
+import { normalizeAreaUnit, normalizeLengthUnit } from './units';
 
 type UnknownRecord = Record<string, unknown>;
 
@@ -68,6 +71,54 @@ function parseAreaMeasurement(value: unknown): AreaMeasurement | null {
     value: value.value,
     ...normalizedUnit,
   };
+}
+
+function parseLengthMeasurement(value: unknown): LengthMeasurement | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  const hasValidCalibrationType =
+    value.calibrationType === undefined || isNonEmptyString(value.calibrationType);
+  const normalizedUnit = isNonEmptyString(value.rawUnit)
+    ? normalizeLengthUnit(value.rawUnit)
+    : null;
+
+  if (
+    value.kind !== 'length' ||
+    typeof value.value !== 'number' ||
+    !Number.isFinite(value.value) ||
+    value.value < 0 ||
+    !isOneOf(value.unit, LENGTH_UNITS) ||
+    normalizedUnit === null ||
+    value.unit !== normalizedUnit.unit ||
+    value.calibrationType !== normalizedUnit.calibrationType ||
+    !hasValidCalibrationType
+  ) {
+    return null;
+  }
+
+  return {
+    kind: 'length',
+    value: value.value,
+    ...normalizedUnit,
+  };
+}
+
+function parseMeasurement(value: unknown): Measurement | null {
+  if (!isRecord(value)) {
+    return null;
+  }
+
+  if (value.kind === 'area') {
+    return parseAreaMeasurement(value);
+  }
+
+  if (value.kind === 'length') {
+    return parseLengthMeasurement(value);
+  }
+
+  return null;
 }
 
 function parseViewerReadyPayload(value: unknown): ViewerReadyPayload | null {
@@ -191,7 +242,7 @@ function parseMeasurementAddedPayload(value: unknown): MeasurementAddedPayload |
     return null;
   }
 
-  const measurement = parseAreaMeasurement(value.measurement);
+  const measurement = parseMeasurement(value.measurement);
 
   if (!measurement) {
     return null;
@@ -216,7 +267,7 @@ function parseMeasurementUpdatedPayload(value: unknown): MeasurementUpdatedPaylo
     return null;
   }
 
-  const measurement = parseAreaMeasurement(value.measurement);
+  const measurement = parseMeasurement(value.measurement);
 
   if (!measurement) {
     return null;

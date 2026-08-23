@@ -12,20 +12,26 @@ describe('scoringReducer', () => {
     const withFirstRow = scoringReducer(initialScoringState, {
       type: 'rowAdded',
       rowId: 'row-1',
+      toolName: 'EllipticalROI',
     });
     const withSecondRow = scoringReducer(withFirstRow, {
       type: 'rowAdded',
       rowId: 'row-2',
+      toolName: 'Length',
     });
 
     expect(withSecondRow.rows).toEqual([
-      { id: 'row-1', status: 'waiting' },
-      { id: 'row-2', status: 'waiting' },
+      { id: 'row-1', status: 'waiting', toolName: 'EllipticalROI' },
+      { id: 'row-2', status: 'waiting', toolName: 'Length' },
     ]);
   });
 
   it('tracks queued activation until the command is actually sent', () => {
-    const withRow = scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' });
+    const withRow = scoringReducer(initialScoringState, {
+      type: 'rowAdded',
+      rowId: 'row-1',
+      toolName: 'EllipticalROI',
+    });
     const queued = scoringReducer(withRow, {
       type: 'activationRequested',
       rowId: 'row-1',
@@ -42,14 +48,19 @@ describe('scoringReducer', () => {
       id: 'row-1',
       status: 'queued',
       activationId: 'activation-1',
+      toolName: 'EllipticalROI',
     });
     expect(drawing.rows[0]?.status).toBe('drawing');
   });
 
   it('allows only one queued or drawing row at a time', () => {
     const withRows = scoringReducer(
-      scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' }),
-      { type: 'rowAdded', rowId: 'row-2' }
+      scoringReducer(initialScoringState, {
+        type: 'rowAdded',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+      }),
+      { type: 'rowAdded', rowId: 'row-2', toolName: 'Length' }
     );
     const firstDrawing = scoringReducer(withRows, {
       type: 'activationRequested',
@@ -74,6 +85,7 @@ describe('scoringReducer', () => {
       rows: [
         {
           id: 'row-1',
+          toolName: 'EllipticalROI',
           status: 'ready',
           annotationId: 'annotation-1',
           measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
@@ -93,7 +105,11 @@ describe('scoringReducer', () => {
 
   it('ignores stale activation callbacks and resets only the matching operation', () => {
     const queued = scoringReducer(
-      scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' }),
+      scoringReducer(initialScoringState, {
+        type: 'rowAdded',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+      }),
       {
         type: 'activationRequested',
         rowId: 'row-1',
@@ -113,12 +129,20 @@ describe('scoringReducer', () => {
     });
 
     expect(staleResult).toBe(queued);
-    expect(cancelled.rows[0]).toEqual({ id: 'row-1', status: 'waiting' });
+    expect(cancelled.rows[0]).toEqual({
+      id: 'row-1',
+      status: 'waiting',
+      toolName: 'EllipticalROI',
+    });
   });
 
   it('stores a correlated area measurement and completes only the matching row', () => {
     const drawing = scoringReducer(
-      scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' }),
+      scoringReducer(initialScoringState, {
+        type: 'rowAdded',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+      }),
       {
         type: 'activationRequested',
         rowId: 'row-1',
@@ -153,6 +177,52 @@ describe('scoringReducer', () => {
       status: 'ready',
       annotationId: 'annotation-1',
       measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+      toolName: 'EllipticalROI',
+    });
+  });
+
+  it('stores only a length measurement in a Length row', () => {
+    const drawing = scoringReducer(
+      scoringReducer(initialScoringState, {
+        type: 'rowAdded',
+        rowId: 'row-length',
+        toolName: 'Length',
+      }),
+      {
+        type: 'activationRequested',
+        rowId: 'row-length',
+        activationId: 'activation-length',
+        outcome: 'sent',
+      }
+    );
+    const mismatched = scoringReducer(drawing, {
+      type: 'measurementReceived',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-length',
+        activationId: 'activation-length',
+        annotationId: 'annotation-area',
+        measurement: { kind: 'area', value: 42, unit: 'mm2', rawUnit: 'mm²' },
+      },
+    });
+    const completed = scoringReducer(drawing, {
+      type: 'measurementReceived',
+      payload: {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-length',
+        activationId: 'activation-length',
+        annotationId: 'annotation-length',
+        measurement: { kind: 'length', value: 18.5, unit: 'mm', rawUnit: 'mm' },
+      },
+    });
+
+    expect(mismatched).toBe(drawing);
+    expect(completed.rows[0]).toEqual({
+      id: 'row-length',
+      status: 'ready',
+      toolName: 'Length',
+      annotationId: 'annotation-length',
+      measurement: { kind: 'length', value: 18.5, unit: 'mm', rawUnit: 'mm' },
     });
   });
 
@@ -167,6 +237,7 @@ describe('scoringReducer', () => {
       rows: [
         {
           id: 'row-1',
+          toolName: 'EllipticalROI',
           status: 'ready',
           annotationId: 'annotation-1',
           measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
@@ -209,6 +280,7 @@ describe('scoringReducer', () => {
       rows: [
         {
           id: 'row-1',
+          toolName: 'EllipticalROI',
           status: 'ready',
           annotationId: 'annotation-1',
           measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
@@ -245,6 +317,7 @@ describe('scoringReducer', () => {
       rows: [
         {
           id: 'row-1',
+          toolName: 'EllipticalROI',
           status: 'ready',
           annotationId: 'annotation-1',
           measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
@@ -269,7 +342,7 @@ describe('scoringReducer', () => {
     });
 
     expect(staleRemoval).toBe(readyState);
-    expect(cleared.rows).toEqual([{ id: 'row-1', status: 'waiting' }]);
+    expect(cleared.rows).toEqual([{ id: 'row-1', status: 'waiting', toolName: 'EllipticalROI' }]);
   });
 
   it('stores viewer capabilities and exposes unsupported-tool errors', () => {
@@ -285,7 +358,11 @@ describe('scoringReducer', () => {
         },
       },
     });
-    const withRow = scoringReducer(connected, { type: 'rowAdded', rowId: 'row-1' });
+    const withRow = scoringReducer(connected, {
+      type: 'rowAdded',
+      rowId: 'row-1',
+      toolName: 'EllipticalROI',
+    });
     const rejected = scoringReducer(withRow, {
       type: 'activationRequested',
       rowId: 'row-1',
@@ -307,11 +384,16 @@ describe('scoringReducer', () => {
       id: 'row-1',
       status: 'error',
       error: 'unsupported',
+      toolName: 'EllipticalROI',
     });
   });
 
   it('exposes bridge failures as retryable row errors', () => {
-    const withRow = scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' });
+    const withRow = scoringReducer(initialScoringState, {
+      type: 'rowAdded',
+      rowId: 'row-1',
+      toolName: 'EllipticalROI',
+    });
 
     const rejected = scoringReducer(withRow, {
       type: 'activationRequested',
@@ -324,6 +406,7 @@ describe('scoringReducer', () => {
       id: 'row-1',
       status: 'error',
       error: 'bridge-error',
+      toolName: 'EllipticalROI',
     });
   });
 
@@ -332,7 +415,11 @@ describe('scoringReducer', () => {
     ['error', 'bridge-error'],
   ] as const)('records an %s rejection for the matching activation', (reason, expectedError) => {
     const drawing = scoringReducer(
-      scoringReducer(initialScoringState, { type: 'rowAdded', rowId: 'row-1' }),
+      scoringReducer(initialScoringState, {
+        type: 'rowAdded',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+      }),
       {
         type: 'activationRequested',
         rowId: 'row-1',
@@ -352,6 +439,7 @@ describe('scoringReducer', () => {
       id: 'row-1',
       status: 'error',
       error: expectedError,
+      toolName: 'EllipticalROI',
     });
   });
 
@@ -366,11 +454,12 @@ describe('scoringReducer', () => {
       rows: [
         {
           id: 'row-1',
+          toolName: 'EllipticalROI' as const,
           status: 'ready' as const,
           annotationId: 'annotation-1',
           measurement: { kind: 'area' as const, value: 42, unit: 'mm2' as const, rawUnit: 'mm²' },
         },
-        { id: 'row-2', status: 'waiting' as const },
+        { id: 'row-2', status: 'waiting' as const, toolName: 'Length' as const },
       ],
     };
 
@@ -378,8 +467,8 @@ describe('scoringReducer', () => {
 
     expect(loading.connection).toEqual({ status: 'connecting' });
     expect(loading.rows).toEqual([
-      { id: 'row-1', status: 'waiting' },
-      { id: 'row-2', status: 'waiting' },
+      { id: 'row-1', status: 'waiting', toolName: 'EllipticalROI' },
+      { id: 'row-2', status: 'waiting', toolName: 'Length' },
     ]);
   });
 
@@ -401,6 +490,7 @@ describe('scoringReducer', () => {
       rows: [
         {
           id: 'row-1',
+          toolName: 'EllipticalROI' as const,
           status: 'ready' as const,
           annotationId: 'annotation-1',
           measurement: { kind: 'area' as const, value: 42, unit: 'mm2' as const, rawUnit: 'mm²' },
@@ -421,6 +511,8 @@ describe('scoringReducer', () => {
       },
     });
 
-    expect(nextSession.rows).toEqual([{ id: 'row-1', status: 'waiting' }]);
+    expect(nextSession.rows).toEqual([
+      { id: 'row-1', status: 'waiting', toolName: 'EllipticalROI' },
+    ]);
   });
 });

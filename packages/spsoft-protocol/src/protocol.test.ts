@@ -4,12 +4,15 @@ import {
   BRIDGE_VERSION,
   createAreaMeasurement,
   createBridgeMessage,
+  createLengthMeasurement,
   isHostToViewerMessage,
   isViewerToHostMessage,
+  measurementMatchesTool,
   parseBridgeMessage,
 } from './index';
 
 const areaMeasurement = createAreaMeasurement(42.25, 'mm² ERMF');
+const lengthMeasurement = createLengthMeasurement(18.5, 'mm');
 
 describe('createBridgeMessage', () => {
   it('creates a versioned message envelope', () => {
@@ -112,6 +115,17 @@ describe('parseBridgeMessage', () => {
         measurement: areaMeasurement,
       },
       'message-updated'
+    ),
+    createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
+      {
+        viewerInstanceId: 'viewer-1',
+        rowId: 'row-length',
+        activationId: 'activation-length',
+        annotationId: 'annotation-length',
+        measurement: lengthMeasurement,
+      },
+      'message-length-added'
     ),
     createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED,
@@ -220,6 +234,21 @@ describe('parseBridgeMessage', () => {
     ).toBeNull();
   });
 
+  it('accepts Length as a supported activation tool', () => {
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+      {
+        targetViewerInstanceId: 'viewer-1',
+        rowId: 'row-1',
+        activationId: 'activation-1',
+        toolName: 'Length',
+      },
+      'message-length-activation'
+    );
+
+    expect(parseBridgeMessage(message)).toEqual(message);
+  });
+
   it('rejects a deactivation reason that cannot be handled by the current viewer instance', () => {
     expect(
       parseBridgeMessage({
@@ -296,6 +325,49 @@ describe('parseBridgeMessage', () => {
     ).toBeNull();
   });
 
+  it.each([
+    ['unsupported canonical unit', { ...lengthMeasurement, unit: 'm' }],
+    ['canonical unit inconsistent with raw unit', { ...lengthMeasurement, unit: 'px' }],
+    ['empty raw unit', { ...lengthMeasurement, rawUnit: ' ' }],
+    ['empty calibration type', { ...lengthMeasurement, calibrationType: '' }],
+  ])('rejects a length measurement with %s', (_caseName, measurement) => {
+    expect(
+      parseBridgeMessage({
+        channel: BRIDGE_CHANNEL,
+        version: BRIDGE_VERSION,
+        type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_UPDATED,
+        messageId: 'message-length-invalid',
+        payload: {
+          viewerInstanceId: 'viewer-1',
+          rowId: 'row-length',
+          annotationId: 'annotation-length',
+          measurement,
+        },
+      })
+    ).toBeNull();
+  });
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])(
+    'rejects an invalid length value: %s',
+    value => {
+      expect(
+        parseBridgeMessage({
+          channel: BRIDGE_CHANNEL,
+          version: BRIDGE_VERSION,
+          type: BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
+          messageId: 'message-length-invalid-value',
+          payload: {
+            viewerInstanceId: 'viewer-1',
+            rowId: 'row-length',
+            activationId: 'activation-length',
+            annotationId: 'annotation-length',
+            measurement: { ...lengthMeasurement, value },
+          },
+        })
+      ).toBeNull();
+    }
+  );
+
   it('returns a sanitized copy without unrecognized fields', () => {
     const validMessage = createBridgeMessage(
       BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED,
@@ -351,5 +423,14 @@ describe('message direction guards', () => {
     expect(isViewerToHostMessage(hostCommand)).toBe(false);
     expect(isHostToViewerMessage(viewerEvent)).toBe(false);
     expect(isViewerToHostMessage(viewerEvent)).toBe(true);
+  });
+});
+
+describe('measurementMatchesTool', () => {
+  it('keeps each measurement kind bound to its OHIF tool', () => {
+    expect(measurementMatchesTool(areaMeasurement, 'EllipticalROI')).toBe(true);
+    expect(measurementMatchesTool(areaMeasurement, 'Length')).toBe(false);
+    expect(measurementMatchesTool(lengthMeasurement, 'Length')).toBe(true);
+    expect(measurementMatchesTool(lengthMeasurement, 'EllipticalROI')).toBe(false);
   });
 });
