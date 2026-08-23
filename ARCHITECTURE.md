@@ -140,8 +140,10 @@ previous session.
 5. The host checks the active request, session, IDs, and duplicate set before moving the row to
    `ready`.
 
-Later OHIF updates produce `MEASUREMENT_UPDATED`. The host changes only the bound row and derives
-new totals from reducer state.
+Later OHIF updates produce `MEASUREMENT_UPDATED`. The Viewer compares each normalized measurement
+with the last published value for that annotation and drops unchanged events. The host changes only
+the bound row and derives new totals from reducer state. Its duplicate-message cache retains only a
+bounded window of recent identifiers, so a long editing session does not grow the set indefinitely.
 
 For form-initiated deletion, the host sends `REMOVE_MEASUREMENT` and marks the annotation as
 pending. It removes the form row only after OHIF emits removal and the Viewer returns

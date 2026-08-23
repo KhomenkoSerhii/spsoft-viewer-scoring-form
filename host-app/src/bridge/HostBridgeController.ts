@@ -10,6 +10,8 @@ import {
   type ViewerReadyPayload,
 } from '@spsoft/viewer-protocol';
 
+const ACCEPTED_MESSAGE_ID_LIMIT = 1_000;
+
 export interface HostMessageWindow {
   addEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
   removeEventListener(type: 'message', listener: (event: MessageEvent<unknown>) => void): void;
@@ -261,7 +263,7 @@ export class HostBridgeController {
       return;
     }
 
-    this.acceptedMessageIds.add(messageId);
+    this.rememberAcceptedMessageId(messageId);
     this.rowIdsByAnnotationId.set(payload.annotationId, payload.rowId);
     this.activeRequest = null;
     this.callbacks.onMeasurementAdded(payload);
@@ -276,7 +278,7 @@ export class HostBridgeController {
       return;
     }
 
-    this.acceptedMessageIds.add(messageId);
+    this.rememberAcceptedMessageId(messageId);
     this.callbacks.onMeasurementUpdated(payload);
   }
 
@@ -289,10 +291,24 @@ export class HostBridgeController {
       return;
     }
 
-    this.acceptedMessageIds.add(messageId);
+    this.rememberAcceptedMessageId(messageId);
     this.rowIdsByAnnotationId.delete(payload.annotationId);
     this.pendingRemovalAnnotationIds.delete(payload.annotationId);
     this.callbacks.onMeasurementRemoved(payload);
+  }
+
+  private rememberAcceptedMessageId(messageId: string): void {
+    this.acceptedMessageIds.add(messageId);
+
+    if (this.acceptedMessageIds.size <= ACCEPTED_MESSAGE_ID_LIMIT) {
+      return;
+    }
+
+    const oldestMessageId = this.acceptedMessageIds.values().next().value;
+
+    if (typeof oldestMessageId === 'string') {
+      this.acceptedMessageIds.delete(oldestMessageId);
+    }
   }
 
   private flushPendingActivation(): void {
