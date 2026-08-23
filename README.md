@@ -22,12 +22,12 @@ See [ARCHITECTURE.md](./ARCHITECTURE.md) for the message contract and implementa
 - automatic return to Pan after drawing or cancellation
 - separate area totals for `mm²`, `cm²`, `px²` and length totals for `mm`, `cm`, `px`
 - study-scoped restoration of form rows and correlated annotations after reload
+- build-time OHIF version label in every viewport, including multi-viewport grids
 - cleanup on mode exit and React unmount
-- focused unit tests and two Playwright integration scenarios
+- focused unit tests and three Playwright integration scenarios
 
 Optional tasks 5.1 (live updates), 5.2 (bidirectional deletion), 5.3 (focus navigation), 5.4
-(Length measurements), and 5.6 (state restoration) are included. Viewport version labels remain
-outside the current scope.
+(Length measurements), 5.5 (per-viewport OHIF version), and 5.6 (state restoration) are included.
 
 ## Prerequisites
 
@@ -149,6 +149,7 @@ extensions/spsoft-viewer-bridge/       OHIF-side bridge extension
 packages/spsoft-protocol/              shared types, parser, and unit normalization
 tests-spsoft/                           focused Playwright scenarios
 .scripts/dev-spsoft.mjs                 combined development launcher
+platform/app/.webpack/webpack.pwa.js    build-time OHIF version injection
 platform/app/public/config/default.js   local origin and DICOM data-source configuration
 ```
 

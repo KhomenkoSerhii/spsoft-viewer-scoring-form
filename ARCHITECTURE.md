@@ -235,6 +235,15 @@ browser evicts local storage. A production clinical deployment would need an exp
 policy and server-side controls for authentication, authorization, encryption, and auditability;
 this browser-only persistence is limited to the test task.
 
+## Build-time viewport version
+
+The Viewer webpack configuration reads the OHIF version from `platform/app/package.json` and
+injects it through `DefinePlugin` as `process.env.OHIF_VERSION`. The browser bundle therefore
+contains a compile-time string and does not fetch or import package metadata at runtime.
+`ViewerViewportGrid` adds one non-interactive version label inside every `ViewportPane`, so changing
+the layout to 2×2 produces four independently positioned labels. The label has no React state or
+effects and cannot intercept viewport interaction.
+
 ## Units and totals
 
 The bridge preserves the exact OHIF unit as `rawUnit` and also derives a canonical unit. Area totals
@@ -265,7 +274,8 @@ consistent with the annotation still visible in OHIF.
 The focused Jest projects cover protocol parsing and units, both tool types, bridge behavior,
 reducer transitions, and separate totals. Playwright exercises the two-origin flow with a real OHIF
 runtime, including Ellipse and Length creation, early activation, focus navigation, live updates,
-deletion in both directions, malformed messages, iframe reload, and full-page state restoration.
+deletion in both directions, malformed messages, iframe reload, full-page state restoration, and
+the package-derived version label in both 1×1 and 2×2 viewport layouts.
 
 The assignment does not require tests for the full OHIF monorepo, so `yarn test:spsoft` runs only
 the added SPSoft packages and integration scenarios.

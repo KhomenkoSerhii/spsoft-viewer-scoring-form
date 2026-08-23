@@ -5,6 +5,8 @@ import { useViewportGrid } from '@ohif/ui-next';
 import EmptyViewport from './EmptyViewport';
 import { useAppConfig } from '@state';
 
+const OHIF_VERSION = process.env.OHIF_VERSION || 'unknown';
+
 function ViewerViewportGrid(props: withAppTypes) {
   const { servicesManager, viewportComponents = [], dataSource, commandsManager } = props;
   const [viewportGrid, viewportGridService] = useViewportGrid();
@@ -274,7 +276,7 @@ function ViewerViewportGrid(props: withAppTypes) {
           <div
             data-cy="viewport-pane"
             data-is-active={isActive}
-            className="flex h-full w-full min-w-[5px] flex-col"
+            className="relative flex h-full w-full min-w-[5px] flex-col"
           >
             <ViewportComponent
               displaySets={displaySets}
@@ -289,6 +291,14 @@ function ViewerViewportGrid(props: withAppTypes) {
                 viewportGridService.setViewportIsReady(viewportId, true);
               }}
             />
+            <div
+              data-cy="ohif-viewport-version"
+              data-ohif-version={OHIF_VERSION}
+              aria-label={`OHIF Viewer version ${OHIF_VERSION}`}
+              className="border-white/15 bg-black/65 pointer-events-none absolute bottom-2 left-2 z-20 select-none rounded border px-1.5 py-0.5 font-mono text-[10px] font-medium tracking-[0.08em] text-white/70 shadow-sm backdrop-blur-[2px]"
+            >
+              OHIF v{OHIF_VERSION}
+            </div>
           </div>
         </ViewportPane>
       );

@@ -1,4 +1,5 @@
 import { expect, test, type FrameLocator, type Locator } from '@playwright/test';
+import viewerPackage from '../platform/app/package.json';
 
 interface CapturedBridgeMessage {
   origin: string;
@@ -9,6 +10,12 @@ interface CapturedBridgeMessage {
 }
 
 interface CornerstoneWindow extends Window {
+  commandsManager?: {
+    run(command: {
+      commandName: string;
+      commandOptions: { numCols: number; numRows: number };
+    }): void;
+  };
   services?: {
     measurementService?: {
       getMeasurements(): Array<{ uid?: string }>;
@@ -40,6 +47,48 @@ interface CornerstoneWindow extends Window {
     };
   };
 }
+
+test('shows the build-time OHIF version in every viewport', async ({ page }) => {
+  test.setTimeout(300_000);
+  await page.goto('/', { waitUntil: 'domcontentloaded' });
+
+  const viewerFrame = page.frameLocator('iframe[title="OHIF medical image viewer"]');
+  const viewportPanes = viewerFrame.locator('[data-cy="viewport-pane"]');
+  const versionLabels = viewerFrame.locator('[data-cy="ohif-viewport-version"]');
+  const expectedLabel = `OHIF v${viewerPackage.version}`;
+
+  await expect(viewportPanes).toHaveCount(1, { timeout: 180_000 });
+  await expect(versionLabels).toHaveCount(1);
+  await expect(versionLabels.first()).toBeVisible();
+  await expect(versionLabels.first()).toHaveText(expectedLabel);
+  await expect(versionLabels.first()).toHaveAttribute('data-ohif-version', viewerPackage.version);
+
+  await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+
+    if (!cornerstoneWindow.commandsManager) {
+      throw new Error('OHIF CommandsManager is unavailable.');
+    }
+
+    cornerstoneWindow.commandsManager.run({
+      commandName: 'setViewportGridLayout',
+      commandOptions: { numRows: 2, numCols: 2 },
+    });
+  });
+
+  await expect(viewportPanes).toHaveCount(4);
+  await expect(versionLabels).toHaveCount(4);
+  expect(await versionLabels.allTextContents()).toEqual(Array(4).fill(expectedLabel));
+  expect(
+    await viewportPanes.evaluateAll(panes =>
+      panes.map(pane => pane.querySelectorAll('[data-cy="ohif-viewport-version"]').length)
+    )
+  ).toEqual([1, 1, 1, 1]);
+
+  for (let index = 0; index < 4; index++) {
+    await expect(versionLabels.nth(index)).toBeVisible();
+  }
+});
 
 async function activateAndDrawMeasurement(
   measurementRow: Locator,
@@ -593,6 +642,16 @@ test('host correlates measurements and restores only persisted annotations after
   const lengthValue = await lengthRow.locator('output').textContent();
   await expect(page.locator('[data-total-kind="area"] output')).toHaveText(expectedTotal);
   await expect(page.locator('[data-total-kind="length"] output')).toHaveText(lengthValue ?? '');
+
+  expect(
+    await page.locator('.measurement-list--filled').evaluate(list => ({
+      overflowY: getComputedStyle(list).overflowY,
+      scrollable: list.scrollHeight > list.clientHeight,
+      rowsClipped: Array.from(list.querySelectorAll('.measurement-row')).some(
+        row => row.scrollHeight > row.clientHeight
+      ),
+    }))
+  ).toEqual({ overflowY: 'auto', scrollable: true, rowsClipped: false });
 
   const lengthAnnotationId = await viewerFrame.locator('body').evaluate(() => {
     const cornerstoneWindow = window as CornerstoneWindow;
