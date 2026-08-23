@@ -67,6 +67,9 @@ Editing a correlated ellipse in OHIF updates its form row and totals. **Delete**
 removal command and waits for Viewer confirmation before removing the row. If the user deletes the
 annotation directly in OHIF, the existing row is cleared and returns to the waiting state.
 
+Clicking a completed row sends a correlated focus command. OHIF selects the linked annotation and
+navigates a compatible viewport to it. Focus is disabled while another row is queued or drawing.
+
 Values are formatted for the Ukrainian locale only in the view; the reducer keeps the original
 numeric value and exact OHIF unit. The footer derives totals from completed rows and displays a
 separate total for every normalized unit. It never implicitly converts or combines `mm²`, `cm²`,

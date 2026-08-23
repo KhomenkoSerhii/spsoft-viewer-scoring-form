@@ -29,6 +29,13 @@ export interface ActivationRequest {
 
 export type ActivationResult = 'queued' | 'sent' | 'busy' | 'unsupported' | 'error';
 
+export interface FocusRequest {
+  annotationId: string;
+  rowId: string;
+}
+
+export type FocusResult = 'sent' | 'busy' | 'unsupported' | 'error';
+
 export interface RemovalRequest {
   annotationId: string;
   rowId: string;
@@ -120,6 +127,44 @@ export class HostBridgeController {
 
     this.postDeactivation(request, 'user-cancelled');
     this.activeRequest = null;
+  }
+
+  focusMeasurement(request: FocusRequest): FocusResult {
+    const viewerInstanceId = this.viewerSession?.viewerInstanceId;
+    const viewerWindow = this.getViewerWindow();
+
+    if (this.pendingRequest || this.activeRequest) {
+      return 'busy';
+    }
+
+    if (!viewerInstanceId || !viewerWindow) {
+      return 'error';
+    }
+
+    if (!this.viewerSession?.capabilities.measurementFocus) {
+      return 'unsupported';
+    }
+
+    if (this.rowIdsByAnnotationId.get(request.annotationId) !== request.rowId) {
+      return 'error';
+    }
+
+    const message = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+      {
+        targetViewerInstanceId: viewerInstanceId,
+        rowId: request.rowId,
+        annotationId: request.annotationId,
+      },
+      this.createId()
+    );
+
+    try {
+      viewerWindow.postMessage(message, this.viewerOrigin);
+      return 'sent';
+    } catch {
+      return 'error';
+    }
   }
 
   removeMeasurement(request: RemovalRequest): RemovalResult {

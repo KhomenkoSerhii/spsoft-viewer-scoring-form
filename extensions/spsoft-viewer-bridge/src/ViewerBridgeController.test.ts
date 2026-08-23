@@ -57,6 +57,10 @@ class FakeMeasurementService extends FakeEventService {
     });
   }
 
+  getMeasurement(measurementId: string): unknown {
+    return { uid: measurementId };
+  }
+
   remove(measurementId: string): void {
     this.removedMeasurementIds.push(measurementId);
     this.emit(this.EVENTS.MEASUREMENT_REMOVED!, { measurement: measurementId });
@@ -214,7 +218,11 @@ describe('ViewerBridgeController handshake', () => {
       payload: {
         viewerInstanceId: 'viewer-session-1',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementDeletion: true, measurementUpdates: true },
+        capabilities: {
+          measurementDeletion: true,
+          measurementFocus: true,
+          measurementUpdates: true,
+        },
       },
     });
   });
@@ -545,6 +553,69 @@ describe('ViewerBridgeController measurement correlation', () => {
         },
       })
     );
+  });
+
+  it('jumps only to a correlated annotation when no tool activation is armed', () => {
+    const { bridgeWindow, commandsManager, controller, makeReady, measurementService } =
+      createHarness();
+    controller.enterMode();
+    makeReady();
+
+    const focusMessage = createBridgeMessage(
+      BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+      {
+        targetViewerInstanceId: 'viewer-session-1',
+        rowId: 'row-1',
+        annotationId: 'annotation-1',
+      },
+      'focus-1'
+    );
+    bridgeWindow.dispatchMessage({ data: focusMessage, origin: 'http://localhost:5173' });
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    bridgeWindow.dispatchMessage({ data: focusMessage, origin: 'http://localhost:5173' });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'annotation-1',
+        toolName: 'EllipticalROI',
+        data: { target: { area: 42.75, areaUnit: 'mm²' } },
+      },
+    });
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.FOCUS_MEASUREMENT,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'other-row',
+          annotationId: 'annotation-1',
+        },
+        'focus-wrong-row'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    bridgeWindow.dispatchMessage({ data: focusMessage, origin: 'http://localhost:5173' });
+
+    expect(commandsManager.runCommand).toHaveBeenCalledWith('jumpToMeasurementViewport', {
+      annotationUID: 'annotation-1',
+      measurement: { uid: 'annotation-1' },
+    });
+    expect(
+      commandsManager.runCommand.mock.calls.filter(
+        ([commandName]) => commandName === 'jumpToMeasurementViewport'
+      )
+    ).toHaveLength(1);
   });
 
   it('removes a correlated annotation on host command and confirms it to the host', () => {

@@ -24,6 +24,7 @@ export type {
   BridgePayloadByType,
   DeactivateToolPayload,
   DeactivationReason,
+  FocusMeasurementPayload,
   HostToViewerMessage,
   MeasurementAddedPayload,
   MeasurementRemovedPayload,

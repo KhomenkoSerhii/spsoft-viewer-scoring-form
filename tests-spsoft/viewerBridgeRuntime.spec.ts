@@ -19,6 +19,8 @@ interface CornerstoneWindow extends Window {
     getRenderingEngines(): Array<{
       getViewports(): Array<{
         getCurrentImageId(): string | undefined;
+        getImageIds(): string[];
+        setImageIdIndex(imageIdIndex: number): Promise<void>;
         worldToCanvas(point: number[]): [number, number];
       }>;
     }>;
@@ -284,6 +286,115 @@ test('host correlates ellipses, ignores unarmed tools, and resets after reload',
   await expect(measurementRow.getByText('Готово')).toBeVisible();
   await expect(measurementRow.locator('output')).toContainText('mm²');
   await expect(measurementRow.getByRole('button', { name: 'Видалити' })).toBeVisible();
+
+  const firstAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    return cornerstoneWindow.cornerstoneTools?.annotation.state
+      .getAllAnnotations()
+      .find(annotation => annotation.metadata?.toolName === 'EllipticalROI')?.annotationUID;
+  });
+
+  if (!firstAnnotationId) {
+    throw new Error('Could not resolve the first correlated ellipse annotation.');
+  }
+
+  const measurementServiceIds = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    return (
+      cornerstoneWindow.services?.measurementService
+        ?.getMeasurements()
+        .map(measurement => measurement.uid) ?? []
+    );
+  });
+  expect(measurementServiceIds).toContain(firstAnnotationId);
+
+  const annotationImageId = await viewerFrame.locator('body').evaluate(async () => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+    const viewport = cornerstoneWindow.cornerstone
+      ?.getRenderingEngines()
+      .flatMap(engine => engine.getViewports())
+      .find(item => Boolean(item.getCurrentImageId()));
+
+    if (!viewport) {
+      throw new Error('Could not resolve the active viewport for focus navigation.');
+    }
+
+    const currentImageId = viewport.getCurrentImageId();
+    const otherImageIndex = viewport.getImageIds().findIndex(imageId => imageId !== currentImageId);
+
+    if (!currentImageId || otherImageIndex < 0) {
+      throw new Error('Focus navigation needs at least two images in the active stack.');
+    }
+
+    await viewport.setImageIdIndex(otherImageIndex);
+    return currentImageId;
+  });
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstone
+            ?.getRenderingEngines()
+            .flatMap(engine => engine.getViewports())
+            .find(item => Boolean(item.getCurrentImageId()))
+            ?.getCurrentImageId();
+        }),
+      { timeout: 30_000 }
+    )
+    .not.toBe(annotationImageId);
+
+  await measurementRow.getByRole('button', { name: 'Показати вимірювання 1 у Viewer' }).click();
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+          return bridgeWindow.__spsoftBridgeMessages.filter(
+            message =>
+              message.origin === 'http://localhost:5173' &&
+              message.data?.type === 'FOCUS_MEASUREMENT'
+          ).length;
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(1);
+
+  const focusedAnnotationId = await viewerFrame.locator('body').evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+    const focusMessage = bridgeWindow.__spsoftBridgeMessages.find(
+      message =>
+        message.origin === 'http://localhost:5173' && message.data?.type === 'FOCUS_MEASUREMENT'
+    );
+    return focusMessage?.data.payload?.annotationId;
+  });
+
+  expect(focusedAnnotationId).toBe(firstAnnotationId);
+
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstone
+            ?.getRenderingEngines()
+            .flatMap(engine => engine.getViewports())
+            .find(item => Boolean(item.getCurrentImageId()))
+            ?.getCurrentImageId();
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(annotationImageId);
+
+  await expect(viewerFrame.locator(`[data-annotation-uid="${firstAnnotationId}"]`)).toBeVisible({
+    timeout: 30_000,
+  });
 
   const valueBeforeDrag = await measurementRow.locator('output').textContent();
   const updateCountBeforeDrag = await page.evaluate(() => {
@@ -735,7 +846,11 @@ test('host queues early activation and ignores malformed messages from the Viewe
       payload: {
         viewerInstanceId: 'forged-viewer',
         supportedTools: ['EllipticalROI'],
-        capabilities: { measurementDeletion: false, measurementUpdates: false },
+        capabilities: {
+          measurementDeletion: false,
+          measurementFocus: false,
+          measurementUpdates: false,
+        },
       },
     };
 

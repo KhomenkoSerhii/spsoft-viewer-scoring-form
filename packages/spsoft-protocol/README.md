@@ -11,6 +11,7 @@ untrusted.
 | Viewer → host | `VIEWER_READY` |
 | Host → viewer | `ACTIVATE_TOOL` |
 | Host → viewer | `DEACTIVATE_TOOL` |
+| Host → viewer | `FOCUS_MEASUREMENT` |
 | Host → viewer | `REMOVE_MEASUREMENT` |
 | Viewer → host | `MEASUREMENT_ADDED` |
 | Viewer → host | `MEASUREMENT_UPDATED` |
@@ -20,9 +21,10 @@ Every message uses channel `spsoft.viewer-bridge`, protocol version `1` and a ca
 `messageId`. Callers generate IDs with `crypto.randomUUID()` so tests can supply deterministic
 values.
 
-`VIEWER_READY` advertises support for live updates and deletion. Commands carry the target Viewer
-session ID, while measurement events carry the session ID that produced them. Creation also
-includes an activation ID; updates and removals use the established row-to-annotation binding.
+`VIEWER_READY` advertises support for focus navigation, live updates, and deletion. Commands carry
+the target Viewer session ID, while measurement events carry the session ID that produced them.
+Creation also includes an activation ID; focus, updates, and removals use the established
+row-to-annotation binding.
 
 ## Boundary validation
 

@@ -27,6 +27,7 @@ export interface ToolGroupService extends BridgeEventService {
 }
 
 export interface MeasurementService extends BridgeEventService {
+  getMeasurement(measurementId: string): unknown;
   remove(measurementId: string): void;
 }
 
