@@ -297,6 +297,102 @@ test('host correlates measurements and restores only persisted annotations after
   const activeViewport = viewerFrame
     .locator('[data-cy="viewport-pane"][data-is-active="true"]')
     .first();
+
+  const stateBeforeDraftCancel = await viewerFrame.locator('body').evaluate(() => {
+    const cornerstoneWindow = window as CornerstoneWindow;
+
+    return {
+      annotationCount:
+        cornerstoneWindow.cornerstoneTools?.annotation.state.getAllAnnotations().length ?? 0,
+      measurementCount:
+        cornerstoneWindow.services?.measurementService?.getMeasurements().length ?? 0,
+    };
+  });
+  const addedMessageCountBeforeDraftCancel = await page.evaluate(() => {
+    const bridgeWindow = window as Window & {
+      __spsoftBridgeMessages: CapturedBridgeMessage[];
+    };
+
+    return bridgeWindow.__spsoftBridgeMessages.filter(
+      message =>
+        message.origin === 'http://localhost:3000' && message.data?.type === 'MEASUREMENT_ADDED'
+    ).length;
+  });
+
+  await measurementRow.getByRole('button', { name: 'Активувати Ellipse' }).click();
+  await expect(measurementRow.getByText('Малювання…')).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.ToolGroupManager.getAllToolGroups().some(
+            toolGroup => toolGroup.getActivePrimaryMouseButtonTool() === 'EllipticalROI'
+          );
+        }),
+      { timeout: 30_000 }
+    )
+    .toBe(true);
+
+  const viewportBoxForDraft = await activeViewport.boundingBox();
+
+  if (!viewportBoxForDraft) {
+    throw new Error('Active OHIF viewport has no bounding box for draft cancellation.');
+  }
+
+  await activeViewport.click({
+    position: {
+      x: viewportBoxForDraft.width * 0.42,
+      y: viewportBoxForDraft.height * 0.4,
+    },
+  });
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+          return cornerstoneWindow.cornerstoneTools?.annotation.state.getAllAnnotations().length;
+        }),
+      { timeout: 30_000 }
+    )
+    .toBeGreaterThan(stateBeforeDraftCancel.annotationCount);
+
+  await measurementRow.getByRole('button', { name: 'Скасувати' }).click();
+  await expect(measurementRow.getByText('Очікує')).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        viewerFrame.locator('body').evaluate(() => {
+          const cornerstoneWindow = window as CornerstoneWindow;
+
+          return {
+            annotationCount:
+              cornerstoneWindow.cornerstoneTools?.annotation.state.getAllAnnotations().length ?? 0,
+            measurementCount:
+              cornerstoneWindow.services?.measurementService?.getMeasurements().length ?? 0,
+          };
+        }),
+      { timeout: 30_000 }
+    )
+    .toEqual(stateBeforeDraftCancel);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() => {
+          const bridgeWindow = window as Window & {
+            __spsoftBridgeMessages: CapturedBridgeMessage[];
+          };
+
+          return bridgeWindow.__spsoftBridgeMessages.filter(
+            message =>
+              message.origin === 'http://localhost:3000' &&
+              message.data?.type === 'MEASUREMENT_ADDED'
+          ).length;
+        }),
+      { timeout: 5_000 }
+    )
+    .toBe(addedMessageCountBeforeDraftCancel);
+
   await activateAndDrawMeasurement(
     measurementRow,
     viewerFrame,

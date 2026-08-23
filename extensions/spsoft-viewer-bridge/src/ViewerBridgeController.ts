@@ -47,6 +47,7 @@ function measurementsMatch(
 
 export interface ViewerBridgeControllerOptions {
   bridgeWindow: BridgeWindow;
+  cancelActiveManipulation?: () => string | undefined;
   commandsManager: ViewerBridgeCommandsManager;
   hostOrigin: string;
   services: ViewerBridgeServices;
@@ -75,6 +76,7 @@ type RejectableHostCommand = Extract<
 
 export class ViewerBridgeController {
   private readonly bridgeWindow: BridgeWindow;
+  private readonly cancelActiveManipulation: (() => string | undefined) | undefined;
   private readonly commandsManager: ViewerBridgeCommandsManager;
   private readonly hostOrigin: string;
   private readonly services: ViewerBridgeServices;
@@ -97,6 +99,7 @@ export class ViewerBridgeController {
 
   constructor(options: ViewerBridgeControllerOptions) {
     this.bridgeWindow = options.bridgeWindow;
+    this.cancelActiveManipulation = options.cancelActiveManipulation;
     this.commandsManager = options.commandsManager;
     this.hostOrigin = options.hostOrigin;
     this.services = options.services;
@@ -173,7 +176,7 @@ export class ViewerBridgeController {
   }
 
   exitMode(): void {
-    this.deactivateArmedTool();
+    this.deactivateArmedTool({ discardDraft: true });
     this.persistenceStore?.flush();
     this.modeActive = false;
     this.readyAnnounced = false;
@@ -400,7 +403,7 @@ export class ViewerBridgeController {
         return;
       }
 
-      this.deactivateArmedTool();
+      this.deactivateArmedTool({ discardDraft: true });
 
       if (!this.setToolActive(toolName)) {
         this.publishCommandRejected(message, 'execution-failed');
@@ -460,7 +463,7 @@ export class ViewerBridgeController {
       return;
     }
 
-    this.deactivateArmedTool();
+    this.deactivateArmedTool({ discardDraft: true });
   }
 
   private publishCommandRejected(
@@ -500,13 +503,50 @@ export class ViewerBridgeController {
     }
   }
 
-  private deactivateArmedTool(): void {
-    if (!this.armedActivation) {
+  private deactivateArmedTool({ discardDraft = false }: { discardDraft?: boolean } = {}): void {
+    const armedActivation = this.armedActivation;
+
+    if (!armedActivation) {
       return;
     }
 
+    // Clear correlation first: Cornerstone's cancel API emits ANNOTATION_COMPLETED for a
+    // draft, which MeasurementService exposes synchronously as MEASUREMENT_ADDED.
     this.armedActivation = null;
+
+    if (discardDraft) {
+      let draftAnnotationId = armedActivation.pendingAnnotationId;
+
+      try {
+        draftAnnotationId = this.cancelActiveManipulation?.() ?? draftAnnotationId;
+      } catch (error) {
+        this.onCommandError?.(error);
+      }
+
+      if (draftAnnotationId) {
+        this.discardDraftMeasurement(draftAnnotationId);
+      }
+    }
+
     this.setToolActive('Pan');
+  }
+
+  private discardDraftMeasurement(annotationId: string): void {
+    this.rowIdsByAnnotationId.delete(annotationId);
+    this.toolNamesByAnnotationId.delete(annotationId);
+    this.lastMeasurementsByAnnotationId.delete(annotationId);
+    this.persistenceStore?.remove(annotationId);
+
+    try {
+      if (this.services.measurementService.getMeasurement(annotationId)) {
+        this.services.measurementService.remove(annotationId);
+        return;
+      }
+
+      this.annotationRepository?.remove(annotationId);
+    } catch (error) {
+      this.onCommandError?.(error);
+    }
   }
 
   private persistMeasurement(

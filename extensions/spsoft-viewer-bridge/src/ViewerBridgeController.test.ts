@@ -212,6 +212,7 @@ function createHarness({
   const ids = ['viewer-session-1', 'ready-message-1', 'viewer-session-2', 'ready-message-2'];
   const onHostMessage = jest.fn();
   const onCommandError = jest.fn();
+  const cancelActiveManipulation = jest.fn<string | undefined, []>(() => undefined);
   const commandsManager = { runCommand: jest.fn() };
   const storage = new MemoryStorage();
   const persistenceStore = new ViewerPersistenceStore(storage, 'study-1');
@@ -247,6 +248,7 @@ function createHarness({
   };
   const controller = new ViewerBridgeController({
     bridgeWindow,
+    cancelActiveManipulation,
     commandsManager,
     hostOrigin: 'http://localhost:5173',
     services,
@@ -271,6 +273,7 @@ function createHarness({
 
   return {
     bridgeWindow,
+    cancelActiveManipulation,
     annotationRepository,
     annotations,
     commandsManager,
@@ -407,8 +410,14 @@ describe('ViewerBridgeController measurement correlation', () => {
   });
 
   it('sends the first valid armed ellipse measurement and returns to Pan', () => {
-    const { bridgeWindow, commandsManager, controller, makeReady, measurementService } =
-      createHarness();
+    const {
+      bridgeWindow,
+      cancelActiveManipulation,
+      commandsManager,
+      controller,
+      makeReady,
+      measurementService,
+    } = createHarness();
     controller.enterMode();
     makeReady();
     bridgeWindow.dispatchMessage({
@@ -456,6 +465,7 @@ describe('ViewerBridgeController measurement correlation', () => {
     expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
       toolName: 'Pan',
     });
+    expect(cancelActiveManipulation).not.toHaveBeenCalled();
   });
 
   it('sends a valid armed Length measurement and returns to Pan', () => {
@@ -1224,7 +1234,8 @@ describe('ViewerBridgeController tool commands', () => {
   });
 
   it('returns to Pan only for the matching active activation', () => {
-    const { bridgeWindow, commandsManager, controller, makeReady } = createHarness();
+    const { bridgeWindow, cancelActiveManipulation, commandsManager, controller, makeReady } =
+      createHarness();
     controller.enterMode();
     makeReady();
     bridgeWindow.dispatchMessage({
@@ -1274,6 +1285,116 @@ describe('ViewerBridgeController tool commands', () => {
       toolName: 'Pan',
     });
     expect(commandsManager.runCommand).toHaveBeenCalledTimes(2);
+    expect(cancelActiveManipulation).toHaveBeenCalledTimes(1);
+  });
+
+  it('discards the Cornerstone draft before its synchronous completion can be correlated', () => {
+    const {
+      bridgeWindow,
+      cancelActiveManipulation,
+      commandsManager,
+      controller,
+      makeReady,
+      measurementService,
+    } = createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    cancelActiveManipulation.mockImplementation(() => {
+      measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+        measurement: {
+          uid: 'draft-annotation',
+          toolName: 'EllipticalROI',
+          data: { target: { area: 42.75, areaUnit: 'mm²' } },
+        },
+      });
+      return 'draft-annotation';
+    });
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          reason: 'user-cancelled',
+        },
+        'cancel-current'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(cancelActiveManipulation).toHaveBeenCalledTimes(1);
+    expect(measurementService.removedMeasurementIds).toEqual(['draft-annotation']);
+    expect(commandsManager.runCommand).toHaveBeenLastCalledWith('setToolActive', {
+      toolName: 'Pan',
+    });
+    expect(
+      bridgeWindow.postedMessages
+        .map(({ message }) => parseBridgeMessage(message))
+        .filter(
+          message =>
+            message?.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_ADDED ||
+            message?.type === BRIDGE_MESSAGE_TYPES.MEASUREMENT_REMOVED
+        )
+    ).toHaveLength(0);
+  });
+
+  it('removes a pending draft when Cornerstone no longer reports an active manipulation', () => {
+    const { bridgeWindow, cancelActiveManipulation, controller, makeReady, measurementService } =
+      createHarness();
+    controller.enterMode();
+    makeReady();
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.ACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+        'activate-1'
+      ),
+      origin: 'http://localhost:5173',
+    });
+    measurementService.emit(measurementService.EVENTS.MEASUREMENT_ADDED!, {
+      measurement: {
+        uid: 'pending-annotation',
+        toolName: 'EllipticalROI',
+        data: {},
+      },
+    });
+
+    bridgeWindow.dispatchMessage({
+      data: createBridgeMessage(
+        BRIDGE_MESSAGE_TYPES.DEACTIVATE_TOOL,
+        {
+          targetViewerInstanceId: 'viewer-session-1',
+          rowId: 'row-1',
+          activationId: 'activation-1',
+          reason: 'user-cancelled',
+        },
+        'cancel-current'
+      ),
+      origin: 'http://localhost:5173',
+    });
+
+    expect(cancelActiveManipulation).toHaveReturnedWith(undefined);
+    expect(measurementService.removedMeasurementIds).toEqual(['pending-annotation']);
   });
 
   it('returns an armed tool to Pan during mode cleanup', () => {
