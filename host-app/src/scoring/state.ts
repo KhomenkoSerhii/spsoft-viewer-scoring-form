@@ -43,6 +43,7 @@ export interface ScoringState {
 
 export type ScoringAction =
   | { type: 'rowAdded'; rowId: string; toolName: SupportedToolName }
+  | { type: 'emptyRowRemoved'; rowId: string }
   | {
       type: 'activationRequested';
       activationId: string;
@@ -84,6 +85,16 @@ export function scoringReducer(state: ScoringState, action: ScoringAction): Scor
         ...state,
         rows: [...state.rows, { id: action.rowId, status: 'waiting', toolName: action.toolName }],
       };
+
+    case 'emptyRowRemoved': {
+      const row = state.rows.find(item => item.id === action.rowId);
+
+      if (!row || (row.status !== 'waiting' && row.status !== 'error')) {
+        return state;
+      }
+
+      return { ...state, rows: state.rows.filter(item => item.id !== action.rowId) };
+    }
 
     case 'viewerLoading':
       return {

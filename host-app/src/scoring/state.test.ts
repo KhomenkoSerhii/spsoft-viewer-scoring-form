@@ -27,6 +27,57 @@ describe('scoringReducer', () => {
     ]);
   });
 
+  it('removes only the requested empty row', () => {
+    const withRows = scoringReducer(
+      scoringReducer(initialScoringState, {
+        type: 'rowAdded',
+        rowId: 'row-1',
+        toolName: 'EllipticalROI',
+      }),
+      { type: 'rowAdded', rowId: 'row-2', toolName: 'Length' }
+    );
+
+    const withoutFirstRow = scoringReducer(withRows, {
+      type: 'emptyRowRemoved',
+      rowId: 'row-1',
+    });
+
+    expect(withoutFirstRow.rows).toEqual([{ id: 'row-2', status: 'waiting', toolName: 'Length' }]);
+  });
+
+  it('does not remove a row with an active or completed measurement', () => {
+    const drawingState: ScoringState = {
+      connection: { status: 'connecting' },
+      rows: [
+        {
+          id: 'drawing-row',
+          status: 'drawing',
+          activationId: 'activation-1',
+          toolName: 'EllipticalROI',
+        },
+      ],
+    };
+    const readyState: ScoringState = {
+      connection: { status: 'connecting' },
+      rows: [
+        {
+          id: 'ready-row',
+          status: 'ready',
+          annotationId: 'annotation-1',
+          measurement: { kind: 'area', value: 42.75, unit: 'mm2', rawUnit: 'mm²' },
+          toolName: 'EllipticalROI',
+        },
+      ],
+    };
+
+    expect(scoringReducer(drawingState, { type: 'emptyRowRemoved', rowId: 'drawing-row' })).toBe(
+      drawingState
+    );
+    expect(scoringReducer(readyState, { type: 'emptyRowRemoved', rowId: 'ready-row' })).toBe(
+      readyState
+    );
+  });
+
   it('tracks queued activation until the command is actually sent', () => {
     const withRow = scoringReducer(initialScoringState, {
       type: 'rowAdded',
