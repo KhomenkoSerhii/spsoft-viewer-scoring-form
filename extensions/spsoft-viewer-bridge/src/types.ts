@@ -31,6 +31,13 @@ export interface MeasurementService extends BridgeEventService {
   remove(measurementId: string): void;
 }
 
+export interface DisplaySetService {
+  getDisplaySetsForSeries(seriesInstanceUid: string): Array<{
+    displaySetInstanceUID?: string;
+    uid?: string;
+  }>;
+}
+
 export interface AnnotationRepository {
   add(annotation: Record<string, unknown>): string;
   get(annotationId: string): Record<string, unknown> | undefined;
@@ -47,6 +54,7 @@ export interface CornerstoneViewportService {
 
 export interface ViewerBridgeServices {
   cornerstoneViewportService?: CornerstoneViewportService;
+  displaySetService?: DisplaySetService;
   measurementService: MeasurementService;
   viewportGridService: ViewportGridService;
   toolGroupService: ToolGroupService;

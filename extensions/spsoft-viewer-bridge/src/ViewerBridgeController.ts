@@ -31,6 +31,32 @@ import {
 } from './measurement';
 
 const READY_RETRY_DELAYS_MS = [100, 250, 500, 1_000, 2_000] as const;
+const STREAMING_VOLUME_ID_PREFIX = 'cornerstoneStreamingImageVolume:';
+
+type UnknownRecord = Record<string, unknown>;
+
+function isRecord(value: unknown): value is UnknownRecord {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function getReferenceSeriesUid(measurement: unknown): string | undefined {
+  if (!isRecord(measurement)) {
+    return undefined;
+  }
+
+  return typeof measurement.referenceSeriesUID === 'string' && measurement.referenceSeriesUID.trim()
+    ? measurement.referenceSeriesUID
+    : undefined;
+}
+
+function rebaseVolumeTargetId(targetId: string, volumeId: string): string {
+  if (!targetId.startsWith('volumeId:')) {
+    return targetId;
+  }
+
+  const queryIndex = targetId.indexOf('?');
+  return `volumeId:${volumeId}${queryIndex === -1 ? '' : targetId.slice(queryIndex)}`;
+}
 
 function measurementsMatch(
   previousMeasurement: Measurement | undefined,
@@ -561,7 +587,77 @@ export class ViewerBridgeController {
       return;
     }
 
-    this.persistenceStore.upsert({ annotation, annotationId, measurement, rowId, toolName });
+    const referenceSeriesUID = getReferenceSeriesUid(
+      this.services.measurementService.getMeasurement(annotationId)
+    );
+
+    this.persistenceStore.upsert({
+      annotation,
+      annotationId,
+      measurement,
+      ...(referenceSeriesUID ? { referenceSeriesUID } : {}),
+      rowId,
+      toolName,
+    });
+  }
+
+  private prepareAnnotationForRestore(stored: PersistedViewerMeasurement): {
+    annotation: Record<string, unknown>;
+    referencedImageId?: string;
+  } {
+    const { displaySetService } = this.services;
+    const metadata = stored.annotation.metadata;
+
+    if (
+      !displaySetService ||
+      !stored.referenceSeriesUID ||
+      !isRecord(metadata) ||
+      typeof metadata.volumeId !== 'string'
+    ) {
+      return { annotation: stored.annotation };
+    }
+
+    const displaySet = displaySetService.getDisplaySetsForSeries(stored.referenceSeriesUID)[0];
+    const displaySetInstanceUID = displaySet?.displaySetInstanceUID ?? displaySet?.uid;
+
+    if (!displaySetInstanceUID) {
+      return { annotation: stored.annotation };
+    }
+
+    const volumeId = `${STREAMING_VOLUME_ID_PREFIX}${displaySetInstanceUID}`;
+    const restoredMetadata: UnknownRecord = { ...metadata, volumeId };
+    const referencedImageId =
+      typeof restoredMetadata.referencedImageId === 'string'
+        ? restoredMetadata.referencedImageId
+        : undefined;
+
+    // Metadata for an inactive volume series may not be registered in Cornerstone yet.
+    // Omitting the image reference lets OHIF resolve the stable series through the rebased volume.
+    delete restoredMetadata.referencedImageId;
+
+    const data = stored.annotation.data;
+    let restoredData = data;
+
+    if (isRecord(data) && isRecord(data.cachedStats)) {
+      restoredData = {
+        ...data,
+        cachedStats: Object.fromEntries(
+          Object.entries(data.cachedStats).map(([targetId, stats]) => [
+            rebaseVolumeTargetId(targetId, volumeId),
+            stats,
+          ])
+        ),
+      };
+    }
+
+    return {
+      annotation: {
+        ...stored.annotation,
+        data: restoredData,
+        metadata: restoredMetadata,
+      },
+      ...(referencedImageId ? { referencedImageId } : {}),
+    };
   }
 
   private restoreMeasurements(bindings: MeasurementBinding[]): void {
@@ -591,9 +687,19 @@ export class ViewerBridgeController {
         if (!this.annotationRepository.get(stored.annotationId)) {
           this.rowIdsByAnnotationId.set(stored.annotationId, stored.rowId);
           this.toolNamesByAnnotationId.set(stored.annotationId, stored.toolName);
+          const prepared = this.prepareAnnotationForRestore(stored);
 
-          if (this.annotationRepository.add(stored.annotation) !== stored.annotationId) {
+          if (this.annotationRepository.add(prepared.annotation) !== stored.annotationId) {
             throw new Error('The restored annotation ID changed.');
+          }
+
+          if (prepared.referencedImageId) {
+            const restoredAnnotation = this.annotationRepository.get(stored.annotationId);
+            const restoredMetadata = restoredAnnotation?.metadata;
+
+            if (isRecord(restoredMetadata)) {
+              restoredMetadata.referencedImageId = prepared.referencedImageId;
+            }
           }
         }
 

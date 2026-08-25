@@ -22,6 +22,7 @@ export interface PersistedViewerMeasurement {
   annotation: Record<string, unknown>;
   annotationId: string;
   measurement: Measurement;
+  referenceSeriesUID?: string;
   rowId: string;
   toolName: SupportedToolName;
 }
@@ -62,12 +63,14 @@ function parseAnnotation(
   }
 
   const { data, metadata } = value;
+  const hasImageReference = isRecord(metadata) && isNonEmptyString(metadata.referencedImageId);
+  const hasVolumeReference = isRecord(metadata) && isNonEmptyString(metadata.volumeId);
 
   if (
     !isRecord(metadata) ||
     metadata.toolName !== toolName ||
     !isNonEmptyString(metadata.FrameOfReferenceUID) ||
-    !isNonEmptyString(metadata.referencedImageId) ||
+    (!hasImageReference && !hasVolumeReference) ||
     !isRecord(data) ||
     !isRecord(data.handles) ||
     !Array.isArray(data.handles.points)
@@ -103,6 +106,9 @@ function parsePersistedMeasurement(value: unknown): PersistedViewerMeasurement |
     annotation,
     annotationId: value.annotationId,
     measurement,
+    ...(isNonEmptyString(value.referenceSeriesUID)
+      ? { referenceSeriesUID: value.referenceSeriesUID }
+      : {}),
     rowId: value.rowId,
     toolName: value.toolName,
   };
