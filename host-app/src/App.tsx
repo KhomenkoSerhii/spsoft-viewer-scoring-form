@@ -136,6 +136,7 @@ interface MeasurementRowItemProps {
   onCancel: (row: MeasurementRow) => void;
   onDelete: (row: MeasurementRow) => void;
   onFocus: (row: MeasurementRow) => void;
+  onRemoveEmpty: (row: MeasurementRow) => void;
   row: MeasurementRow;
 }
 
@@ -147,6 +148,7 @@ function MeasurementRowItem({
   onCancel,
   onDelete,
   onFocus,
+  onRemoveEmpty,
   row,
 }: MeasurementRowItemProps) {
   const copy = statusCopy[row.status];
@@ -234,14 +236,23 @@ function MeasurementRowItem({
           Видалити
         </button>
       ) : (
-        <button
-          className="measurement-row__button"
-          type="button"
-          disabled={!canActivate}
-          onClick={() => onActivate(row)}
-        >
-          {measurementCopy.activationLabel}
-        </button>
+        <div className="measurement-row__actions">
+          <button
+            className="measurement-row__button"
+            type="button"
+            disabled={!canActivate}
+            onClick={() => onActivate(row)}
+          >
+            {measurementCopy.activationLabel}
+          </button>
+          <button
+            className="measurement-row__button measurement-row__button--remove-empty"
+            type="button"
+            onClick={() => onRemoveEmpty(row)}
+          >
+            Прибрати
+          </button>
+        </div>
       )}
     </article>
   );
@@ -254,6 +265,7 @@ interface ScoringPanelProps {
   onCancel: (row: MeasurementRow) => void;
   onDelete: (row: MeasurementRow) => void;
   onFocus: (row: MeasurementRow) => void;
+  onRemoveEmpty: (row: MeasurementRow) => void;
   state: ScoringState;
 }
 
@@ -264,6 +276,7 @@ function ScoringPanel({
   onCancel,
   onDelete,
   onFocus,
+  onRemoveEmpty,
   state,
 }: ScoringPanelProps) {
   const connected = state.connection.status === 'ready';
@@ -347,6 +360,7 @@ function ScoringPanel({
               onCancel={onCancel}
               onDelete={onDelete}
               onFocus={onFocus}
+              onRemoveEmpty={onRemoveEmpty}
             />
           ))
         ) : (
@@ -538,6 +552,10 @@ export function App() {
     }
   }, []);
 
+  const handleRemoveEmpty = useCallback((row: MeasurementRow) => {
+    dispatch({ type: 'emptyRowRemoved', rowId: row.id });
+  }, []);
+
   const handleFocus = useCallback((row: MeasurementRow) => {
     if (!row.annotationId) {
       return;
@@ -564,6 +582,7 @@ export function App() {
         onCancel={handleCancel}
         onDelete={handleDelete}
         onFocus={handleFocus}
+        onRemoveEmpty={handleRemoveEmpty}
       />
     </main>
   );

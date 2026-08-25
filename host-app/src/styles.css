@@ -471,6 +471,19 @@ h1 {
   cursor: pointer;
 }
 
+.measurement-row__actions {
+  position: relative;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1.35fr) minmax(0, 0.85fr);
+  gap: 8px;
+  margin-top: 14px;
+}
+
+.measurement-row__actions .measurement-row__button {
+  margin-top: 0;
+}
+
 .measurement-row__button:hover:not(:disabled) {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -503,6 +516,18 @@ h1 {
 .measurement-row__button--delete:hover:not(:disabled) {
   border-color: #a54b43;
   background: #f1ded9;
+}
+
+.measurement-row__button--remove-empty {
+  border-color: #c7cdca;
+  color: #65716f;
+  background: #f5f5f1;
+}
+
+.measurement-row__button--remove-empty:hover:not(:disabled) {
+  border-color: #b77d76;
+  color: #7f3e38;
+  background: #f5eae7;
 }
 
 @keyframes status-pulse {
